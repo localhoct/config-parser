@@ -1,8 +1,16 @@
-import { parseProxyLink, ParsedProxy, extractGroupKey } from './proxyParser';
+import { parseProxyLink, buildGroupKey, ParsedProxy } from './proxyParser';
+
+export interface ConfigGroup {
+  key: string;
+  country: string;
+  tag: string;
+  isVIP: boolean;
+  proxies: ParsedProxy[];
+}
 
 export interface SubscriptionData {
   proxies: ParsedProxy[];
-  groups: Map<string, ParsedProxy[]>;
+  groups: Map<string, ConfigGroup>;
 }
 
 const CORS_PROXIES = [
@@ -12,26 +20,24 @@ const CORS_PROXIES = [
 ];
 
 export async function fetchSubscription(url: string): Promise<string> {
-  // Try direct fetch first (works if server has CORS enabled)
+  // Replace forsubs with www
+  const targetUrl = url.replace('forsubs.software4you.ir', 'www.software4you.ir');
+  
+  // Try direct fetch first
   try {
-    const response = await fetch(url, {
-      headers: {
-        'Accept': 'text/plain, application/x-sqlite3, */*',
-      },
+    const response = await fetch(targetUrl, {
+      headers: { 'Accept': 'text/plain, */*' },
     });
     if (response.ok) {
       const text = await response.text();
-      // Check if it's actual subscription data (not HTML page)
       if (text.includes('://') && !text.includes('<html')) return text;
     }
-  } catch {
-    // Continue to CORS proxies
-  }
+  } catch {}
 
   // Try CORS proxies
   for (const proxy of CORS_PROXIES) {
     try {
-      const proxyUrl = proxy + encodeURIComponent(url);
+      const proxyUrl = proxy + encodeURIComponent(targetUrl);
       const response = await fetch(proxyUrl);
       if (response.ok) {
         const text = await response.text();
@@ -42,55 +48,45 @@ export async function fetchSubscription(url: string): Promise<string> {
     }
   }
 
-  throw new Error('خطا در دریافت ساب‌لینک. لطفاً لینک‌های خام را مستقیماً وارد کنید یا از CORS proxy استفاده کنید.');
+  throw new Error('خطا در دریافت ساب‌لینک. لطفاً لینک‌های خام را مستقیماً وارد کنید.');
 }
 
 export function decodeSubscription(raw: string): string[] {
   let decoded: string;
-  
-  // Try base64 decode
   try {
-    // Remove whitespace and newlines
     const cleaned = raw.replace(/\s/g, '');
     decoded = atob(cleaned);
   } catch {
-    // Not base64, use as-is
     decoded = raw;
   }
   
-  // Split by newlines and filter empty lines
-  const links = decoded
+  return decoded
     .split('\n')
     .map(l => l.trim())
     .filter(l => l.length > 0 && (
       l.startsWith('vless://') ||
-      l.startsWith('vmess://') ||
       l.startsWith('trojan://') ||
-      l.startsWith('ss://') ||
-      l.startsWith('ssr://') ||
-      l.startsWith('hysteria://') ||
-      l.startsWith('hy2://') ||
-      l.startsWith('tuic://') ||
-      l.startsWith('wireguard://')
+      l.startsWith('ss://')
     ));
-  
-  return links;
 }
 
 export function parseSubscription(links: string[]): SubscriptionData {
   const proxies: ParsedProxy[] = [];
-  const groups = new Map<string, ParsedProxy[]>();
+  const groups = new Map<string, ConfigGroup>();
   
   for (const link of links) {
     const proxy = parseProxyLink(link);
     if (proxy) {
+      const { key, country, tag, isVIP } = buildGroupKey(proxy);
+      proxy.countryCode = country;
+      proxy.tag = tag;
+      proxy.isVIP = isVIP;
       proxies.push(proxy);
       
-      const groupKey = extractGroupKey(proxy.name);
-      if (!groups.has(groupKey)) {
-        groups.set(groupKey, []);
+      if (!groups.has(key)) {
+        groups.set(key, { key, country, tag, isVIP, proxies: [] });
       }
-      groups.get(groupKey)!.push(proxy);
+      groups.get(key)!.proxies.push(proxy);
     }
   }
   

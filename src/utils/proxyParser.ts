@@ -7,7 +7,7 @@ export interface ParsedProxy {
   password?: string;
   method?: string;
   security?: string;
-  type?: string; // network type: tcp, ws, grpc, etc.
+  type?: string;
   sni?: string;
   fp?: string;
   flow?: string;
@@ -18,61 +18,32 @@ export interface ParsedProxy {
   alpn?: string;
   encryption?: string;
   rawLink: string;
+  // Extracted metadata
   countryCode?: string;
+  tag?: string; // [CF], [Direct], [VIP], [FS], etc.
+  isVIP?: boolean;
 }
 
 export function parseVless(link: string): ParsedProxy | null {
   try {
     const url = new URL(link);
-    const uuid = url.username;
-    const address = url.hostname;
-    const port = parseInt(url.port);
-    const name = decodeURIComponent(url.hash.slice(1));
-    
-    const params = url.searchParams;
-    
     return {
       protocol: 'vless',
-      name,
-      address,
-      port,
-      uuid,
-      security: params.get('security') || 'none',
-      type: params.get('type') || 'tcp',
-      sni: params.get('sni') || '',
-      fp: params.get('fp') || '',
-      flow: params.get('flow') || '',
-      pbk: params.get('pbk') || '',
-      sid: params.get('sid') || '',
-      path: params.get('path') || '',
-      host: params.get('host') || '',
-      alpn: params.get('alpn') || '',
-      encryption: params.get('encryption') || 'none',
-      rawLink: link,
-    };
-  } catch {
-    return null;
-  }
-}
-
-export function parseVmess(link: string): ParsedProxy | null {
-  try {
-    const b64 = link.replace('vmess://', '');
-    const decoded = atob(b64);
-    const config = JSON.parse(decoded);
-    
-    return {
-      protocol: 'vmess',
-      name: config.ps || '',
-      address: config.add || '',
-      port: parseInt(config.port),
-      uuid: config.id || '',
-      security: config.tls || 'none',
-      type: config.net || 'tcp',
-      sni: config.sni || '',
-      path: config.path || '',
-      host: config.host || '',
-      alpn: config.alpn || '',
+      name: decodeURIComponent(url.hash.slice(1)),
+      address: url.hostname,
+      port: parseInt(url.port),
+      uuid: url.username,
+      security: url.searchParams.get('security') || 'none',
+      type: url.searchParams.get('type') || 'tcp',
+      sni: url.searchParams.get('sni') || '',
+      fp: url.searchParams.get('fp') || '',
+      flow: url.searchParams.get('flow') || '',
+      pbk: url.searchParams.get('pbk') || '',
+      sid: url.searchParams.get('sid') || '',
+      path: url.searchParams.get('path') || '',
+      host: url.searchParams.get('host') || '',
+      alpn: url.searchParams.get('alpn') || '',
+      encryption: url.searchParams.get('encryption') || 'none',
       rawLink: link,
     };
   } catch {
@@ -83,26 +54,19 @@ export function parseVmess(link: string): ParsedProxy | null {
 export function parseTrojan(link: string): ParsedProxy | null {
   try {
     const url = new URL(link);
-    const password = url.username;
-    const address = url.hostname;
-    const port = parseInt(url.port);
-    const name = decodeURIComponent(url.hash.slice(1));
-    
-    const params = url.searchParams;
-    
     return {
       protocol: 'trojan',
-      name,
-      address,
-      port,
-      password,
-      security: params.get('security') || 'tls',
-      type: params.get('type') || 'tcp',
-      sni: params.get('sni') || '',
-      fp: params.get('fp') || '',
-      path: params.get('path') || '',
-      host: params.get('host') || '',
-      alpn: params.get('alpn') || '',
+      name: decodeURIComponent(url.hash.slice(1)),
+      address: url.hostname,
+      port: parseInt(url.port),
+      password: url.username,
+      security: url.searchParams.get('security') || 'tls',
+      type: url.searchParams.get('type') || 'tcp',
+      sni: url.searchParams.get('sni') || '',
+      fp: url.searchParams.get('fp') || '',
+      path: url.searchParams.get('path') || '',
+      host: url.searchParams.get('host') || '',
+      alpn: url.searchParams.get('alpn') || '',
       rawLink: link,
     };
   } catch {
@@ -112,31 +76,20 @@ export function parseTrojan(link: string): ParsedProxy | null {
 
 export function parseSS(link: string): ParsedProxy | null {
   try {
-    let address: string, port: number, method: string, password: string, name: string;
-    
-    // Try new format: ss://base64(method:password)@address:port#name
     const url = new URL(link);
-    const userInfo = url.username;
-    address = url.hostname;
-    port = parseInt(url.port);
-    name = decodeURIComponent(url.hash.slice(1));
-    
+    let method: string, password: string;
     try {
-      const decoded = atob(userInfo);
-      const [m, p] = decoded.split(':');
-      method = m;
-      password = p;
+      const decoded = atob(url.username);
+      [method, password] = decoded.split(':');
     } catch {
-      // legacy format
-      method = userInfo;
+      method = url.username;
       password = '';
     }
-    
     return {
       protocol: 'shadowsocks',
-      name,
-      address,
-      port,
+      name: decodeURIComponent(url.hash.slice(1)),
+      address: url.hostname,
+      port: parseInt(url.port),
       method,
       password,
       rawLink: link,
@@ -149,43 +102,55 @@ export function parseSS(link: string): ParsedProxy | null {
 export function parseProxyLink(link: string): ParsedProxy | null {
   const trimmed = link.trim();
   if (trimmed.startsWith('vless://')) return parseVless(trimmed);
-  if (trimmed.startsWith('vmess://')) return parseVmess(trimmed);
   if (trimmed.startsWith('trojan://')) return parseTrojan(trimmed);
   if (trimmed.startsWith('ss://')) return parseSS(trimmed);
   return null;
 }
 
-export function extractCountryCode(name: string): string | null {
-  // Match country codes from emoji flags or text patterns
-  // Flag emojis: 🇩🇪 DE, 🇳🇱 NL, 🇫🇮 FI, etc.
+// Extract country code from name (flag emoji or 2-letter code)
+export function extractCountryCode(name: string): string {
+  // Flag emoji
   const flagPattern = /[\u{1F1E0}-\u{1F1FF}]{2}/u;
   const flagMatch = name.match(flagPattern);
-  
   if (flagMatch) {
-    // Convert flag emoji to country code
-    const flag = flagMatch[0];
-    const codePoints = [...flag].map(c => c.codePointAt(0)! - 0x1F1E6 + 65);
+    const codePoints = [...flagMatch[0]].map(c => c.codePointAt(0)! - 0x1F1E6 + 65);
     return String.fromCharCode(...codePoints);
   }
-  
-  // Try text pattern: DE, NL, FI, US, etc.
-  const textPattern = /\b([A-Z]{2})\b/;
-  const textMatch = name.match(textPattern);
-  if (textMatch) {
-    const knownCodes = ['DE', 'NL', 'FI', 'US', 'CA', 'SE', 'TR', 'FR', 'GB', 'JP', 'KR', 'SG', 'AU', 'BR', 'IN', 'RU', 'IT', 'ES', 'AT', 'CH', 'IR'];
-    if (knownCodes.includes(textMatch[1])) {
-      return textMatch[1];
-    }
+  // Text code like DE, NL, FI, US
+  const knownCodes = ['DE', 'NL', 'FI', 'US', 'CA', 'SE', 'TR', 'FR', 'GB', 'JP', 'KR', 'SG', 'AU', 'BR', 'IN', 'RU', 'IT', 'ES', 'AT', 'CH'];
+  for (const code of knownCodes) {
+    if (name.includes(code)) return code;
   }
-  
-  return null;
+  return 'OTHER';
 }
 
-export function extractGroupKey(name: string): string {
-  const countryCode = extractCountryCode(name);
-  if (countryCode) return countryCode;
+// Extract tag from name: [CF], [Direct], [VIP], [FS], etc.
+export function extractTag(name: string): string {
+  // Match [XXX] patterns
+  const bracketMatch = name.match(/\[([^\]]+)\]/);
+  if (bracketMatch) return bracketMatch[1].trim();
   
-  // Fallback: use first word
-  const words = name.replace(/[^\w\s]/g, '').trim().split(/\s+/);
-  return words[0] || 'Unknown';
+  // Special patterns
+  if (name.includes('~ Hamrah-Aval')) return 'Hamrah-Aval';
+  if (name.includes('VIP')) return 'VIP';
+  
+  return 'default';
+}
+
+// Check if this is a VIP config (should not be merged)
+export function isVIPConfig(name: string): boolean {
+  return name.includes('[VIP]');
+}
+
+// Build group key: "DE_CF", "NL_Direct", etc.
+export function buildGroupKey(proxy: ParsedProxy): { key: string; country: string; tag: string; isVIP: boolean } {
+  const country = extractCountryCode(proxy.name);
+  const tag = extractTag(proxy.name);
+  const vip = isVIPConfig(proxy.name);
+  
+  if (vip) {
+    return { key: `VIP_${country}_${proxy.name.replace(/[^\w]/g, '_').slice(0, 20)}`, country, tag: 'VIP', isVIP: true };
+  }
+  
+  return { key: `${country}_${tag}`, country, tag, isVIP: false };
 }

@@ -1,144 +1,150 @@
-# Config Merger - ترکیب هوشمند کانفیگ‌ها
+# Config Merger - نسخه ساده (بدون سرور)
 
 ## 🎯 معرفی
 
-این ابزار یک **صفحه واسط** است که:
-1. ساب‌لینک پروکسی‌ها را دریافت می‌کند
-2. پروکسی‌ها را بر اساس کشور (DE, NL, FI, US, ...) گروه‌بندی می‌کند
-3. هر گروه را به یک کانفیگ Xray با **balancer leastLoad** تبدیل می‌کند
-4. **FinalMask** templates (POP3, SMTP, RDP, ICMP) را به outbound ها اضافه می‌کند
-5. خروجی JSON/Base64 برای استفاده در کلاینت‌ها تولید می‌کند
+یک ابزار فرانت‌اند ساده که ساب‌لینک پروکسی‌ها را دریافت کرده و بر اساس **کشور** و **تگ** ([CF], [Direct], [FS]) گروه‌بندی و ترکیب می‌کند.
 
-## 📋 مثال
+## 🔄 منطق کار
 
+### ورودی:
 ```
-🇳🇱 NL-01, NL-02, ..., NL-09 → یک کانفیگ NL با 9 outbound + balancer
-🇩🇪 DE-01, DE-02, DE-03 → یک کانفیگ DE با 3 outbound + balancer
-🇫🇮 FI-01, FI-02 → یک کانفیگ FI با 2 outbound + balancer
+https://forsubs.software4you.ir/sub/...
 ```
 
-## 🚀 نحوه استفاده
-
-### حالت ۱: فرانت‌اند (مرورگر)
-1. ساب‌لینک خود را وارد کنید
-2. دکمه "پردازش و ترکیب" را بزنید
-3. کشور مورد نظر را انتخاب کنید
-4. کانفیگ JSON را کپی کنید
-5. در کلاینت (v2rayN, FlClash, v2rayNG) import کنید
-
-### حالت ۲: Backend (Production)
-```bash
-# Build frontend
-npm install
-npm run build
-
-# Run backend
-cd server
-npm install
-npm start
-
-# Configure Nginx (see nginx/config.conf)
-# Setup SSL with Let's Encrypt
+### تبدیل به:
+```
+https://www.software4you.ir/sub/...
 ```
 
-## ساختار
+### پردازش:
+1. تمام کانفیگ‌ها از ساب‌لینک دریافت می‌شوند
+2. هر کانفیگ بر اساس نام دسته‌بندی می‌شود:
+   - **کشور**: از flag emoji یا کد 2 حرفی (DE, NL, FI, US, ...)
+   - **تگ**: از براکت [CF], [Direct], [FS], ...
+   - **VIP**: اگر `[VIP]` در نام باشد
+
+### خروجی:
+
+#### گروه‌های ترکیبی (با Balancer):
 ```
-├── src/                    # React Frontend
-│   ├── App.tsx            # کامپوننت اصلی
+🇳🇱 NL [CF]    → 5 پروکسی → 1 کانفیگ با balancer leastLoad
+🇩🇪 DE [Direct] → 3 پروکسی → 1 کانفیگ با balancer leastLoad
+🇫🇮 FI [CF]    → 2 پروکسی → 1 کانفیگ با balancer leastLoad
+```
+
+#### کانفیگ‌های VIP (بدون ترکیب):
+```
+🇩🇪 DE • [VIP] 🔥🚀 → 1 کانفیگ جداگانه (Custom Config)
+🇺🇸 US • [VIP] 🔥🚀 → 1 کانفیگ جداگانه (Custom Config)
+🇳🇱 NL • [VIP] 🔥🚀 → 1 کانفیگ جداگانه (Custom Config)
+```
+
+## 📦 ساختار
+
+```
+├── src/
+│   ├── App.tsx              # UI اصلی
 │   ├── utils/
-│   │   ├── proxyParser.ts    # Parse لینک‌های vless/vmess/trojan/ss
-│   │   ├── subscription.ts   # Fetch و decode ساب‌لینک
-│   │   └── configBuilder.ts  # ساخت کانفیگ Xray با balancer
+│   │   ├── proxyParser.ts   # Parse لینک‌ها + استخراج کشور/تگ
+│   │   ├── subscription.ts  # Fetch ساب‌لینک + گروه‌بندی
+│   │   └── configBuilder.ts # ساخت کانفیگ Xray با FinalMask
 │   └── index.css
-├── server/               # Backend (Express)
-│   └── index.js         # API endpoint برای ساب‌لینک
-├── nginx/
-│   └── config.conf      # Nginx reverse proxy config
-└── dist/                # Build output
+├── index.html
+└── dist/                    # خروجی build
 ```
 
-## Deployment
+## 🚀 استفاده
 
-### 1. Build Frontend
+### روش ۱: اجرای محلی
+```bash
+npm install
+npm run dev
+```
+
+### روش ۲: Build و Deploy
 ```bash
 npm install
 npm run build
+# فایل‌های dist/ را روی هر web server بگذارید
 ```
 
-### 2. Setup Backend (Node.js)
-```bash
-cd server
-npm install
-node index.js
-```
-سرور روی پورت 3001 اجرا می‌شود.
+### روش ۳: استفاده مستقیم
+1. ساب‌لینک خود را وارد کنید
+2. دکمه "دریافت و پردازش" را بزنید
+3. در تب "ترکیبی" گروه‌های [CF], [Direct], [FS] را ببینید
+4. در تب "VIP" کانفیگ‌های VIP را ببینید
+5. هر کدام را انتخاب و JSON/Base64 کپی کنید
+6. در کلاینت (v2rayN, FlClash, v2rayNG) import کنید
 
-### 3. Nginx Configuration
-فایل `nginx/config.conf` را در `/etc/nginx/sites-available/` کپی کنید:
-```bash
-sudo cp nginx/config.conf /etc/nginx/sites-available/config-merger
-sudo ln -s /etc/nginx/sites-available/config-merger /etc/nginx/sites-enabled/
-```
+## 🎨 ویژگی‌ها
 
-### 4. SSL Certificate (Let's Encrypt)
-```bash
-sudo certbot --nginx -d your-domain.com
-```
+- ✅ تشخیص خودکار کشور از flag emoji یا کد
+- ✅ تشخیص تگ‌ها: [CF], [Direct], [VIP], [FS], ...
+- ✅ ترکیب پروکسی‌های هم‌گروه با balancer `leastLoad`
+- ✅ VIP ها به صورت custom config جداگانه
+- ✅ FinalMask templates (POP3, SMTP, RDP)
+- ✅ BurstObservatory برای پینگ خودکار
+- ✅ خروجی JSON یا Base64
+- ✅ بدون نیاز به سرور (کاملاً client-side)
 
-### 5. Restart Nginx
-```bash
-sudo systemctl restart nginx
-```
+## 🔧 کانفیگ خروجی
 
-## API Endpoints
-
-### GET /api/sub/merge?url=<subscription_url>
-ساب‌لینک را دریافت و کانفیگ‌های ترکیبی را برمی‌گرداند.
-
-**Response:**
+### گروه ترکیبی:
 ```json
 {
-  "groups": {
-    "DE": { "config": {...}, "count": 5 },
-    "NL": { "config": {...}, "count": 3 }
+  "remarks": "🇳🇱 NL [CF]",
+  "outbounds": [
+    { "tag": "proxy", "protocol": "vless", ... },
+    { "tag": "proxy-2", "protocol": "vless", ... },
+    { "tag": "proxy-3", "protocol": "vless", ... },
+    { "tag": "DIRECT", "protocol": "freedom" },
+    { "tag": "BLOCK", "protocol": "blackhole" }
+  ],
+  "routing": {
+    "balancers": [{
+      "tag": "auto",
+      "selector": ["proxy", "proxy-2", "proxy-3"],
+      "strategy": { "type": "leastLoad", ... }
+    }],
+    "rules": [{ "balancerTag": "auto" }]
   }
 }
 ```
 
-### GET /api/sub/merge/:country
-کانفیگ ترکیبی یک کشور خاص را برمی‌گرداند (JSON خام برای کلاینت‌های Xray).
+### کانفیگ VIP:
+```json
+{
+  "remarks": "🇩🇪 DE • [VIP] 🔥🚀",
+  "outbounds": [
+    { "tag": "proxy", "protocol": "vless", ... },
+    { "tag": "DIRECT", "protocol": "freedom" },
+    { "tag": "BLOCK", "protocol": "blackhole" }
+  ],
+  "routing": {
+    "rules": [{ "outboundTag": "proxy" }]
+  }
+}
+```
 
-## نحوه کار
+## ⚠️ نکات
 
-1. **دریافت ساب‌لینک**: لینک‌های پروکسی از URL ورودی fetch می‌شوند
-2. **Parse**: لینک‌های vless://, vmess://, trojan://, ss:// parse می‌شوند
-3. **گروه‌بندی**: بر اساس نام کشور (از flag emoji یا کد 2 حرفی) گروه‌بندی می‌شوند
-4. **ترکیب**: هر گروه به یک کانفیگ Xray تبدیل می‌شود با:
-   - چندین outbound (هر پروکسی یک outbound)
-   - Balancer با استراتژی leastLoad
-   - BurstObservatory برای پینگ خودکار
-   - Routing rules
-   - FinalMask settings (در صورت وجود)
-5. **خروجی**: JSON یا Base64 برای استفاده در کلاینت‌ها
+- برای fetch ساب‌لینک از CORS proxy استفاده می‌شود (اگر سرور CORS نداشته باشد)
+- اگر CORS کار نکرد، از تب "لینک خام" استفاده کنید
+- FinalMask templates به صورت چرخشی به outbound های TCP اضافه می‌شوند
+- اگر فقط یک پروکسی در گروه باشد، balancer حذف می‌شود
 
-## کانفیگ خروجی
+## 📱 کلاینت‌های پشتیبانی شده
 
-هر کانفیگ شامل:
-- **remarks**: نام کشور با flag emoji
-- **inbounds**: socks (10808) + http (10809)
-- **outbounds**: تمام پروکسی‌های آن کشور + DIRECT + BLOCK
-- **routing**: balancer leastLoad با fallback
-- **burstObservatory**: پینگ هر 3 دقیقه
-- **policy**: timeout settings
+- **v2rayN** (Windows): فایل → وارد کردن → از کلیپ‌بورد
+- **v2rayNG** (Android): افزودن از کلیپ‌بورد
+- **FlClash** (Cross-platform): پروفایل → افزودن → Local
+- **Streisand** (iOS): افزودن از لینک
+- **V2Box** (iOS/Android): افزودن از کلیپ‌بورد
 
-## پشتیبانی پروتکل‌ها
-- VLESS (TCP, WS, gRPC, KCP)
-- VMess
-- Trojan
-- Shadowsocks
+## 🛠️ تکنولوژی‌ها
 
-## امنیت
-- CORS headers مناسب
-- Rate limiting (در production)
-- SSL/TLS اجباری
-- Input validation
+- React 18
+- TypeScript
+- Tailwind CSS 4
+- Vite
+- Xray Core config format
