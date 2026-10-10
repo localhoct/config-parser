@@ -57,7 +57,7 @@ http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-L
 
 ### کلاینت (کانفیگ‌های ترکیبی):
 ```bash
-curl -H "X-Merged-Configs: true" \
+curl -H "Accept: application/json" \
   http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-LAcrFCtzi4J5o-9V4
 ```
 → کانفیگ‌های JSON ترکیبی با balancer
@@ -212,7 +212,7 @@ cache-control: no-store
 - ✅ بدون نیاز به redirect یا پردازش اضافی
 
 ### 🔀 پردازش کانفیگ (برای کلاینت)
-- ✅ تشخیص کلاینت با هدر `X-Merged-Configs: true`
+- ✅ تشخیص خودکار مرورگر از کلاینت (بر اساس `Accept` header)
 - ✅ دریافت خودکار از `www.software4you.ir`
 - ✅ تشخیص کشور از flag emoji یا کد 2 حرفی
 - ✅ **حفظ پرچم اصلی** از remarks کانفیگ (حتی برای DE2, NL5, FI10)
@@ -301,7 +301,9 @@ PORT=8080 node server.js
 - **بدون redirect** - کاربر در همان دامنه شما می‌ماند
 
 ### 🔀 Config Processing Mode (برای کلاینت)
-- **هدر `X-Merged-Configs: true`** - کلاینت باید این هدر را ارسال کند تا کانفیگ‌های ترکیبی دریافت کند
+- **تشخیص خودکار** - بر اساس `Accept` header
+  - `Accept: text/html` → Proxy به سرور اصلی (مرورگر)
+  - `Accept: application/json` یا `text/plain` → کانفیگ‌های ترکیبی (کلاینت)
 - سرور به صورت خودکار `forsubs.software4you.ir` را به `www.software4you.ir` تبدیل می‌کند
 - **FinalMask اصلی کانفیگ حفظ می‌شود** - سرور هیچ FinalMask جدیدی اضافه نمی‌کند
 - **پرچم اصلی حفظ می‌شود** - حتی برای DE2, NL5, FI10 پرچم 🇩🇪, 🇳🇱, 🇫🇮 از remarks اصلی استخراج می‌شود
@@ -328,7 +330,7 @@ node test-server.js
 
 این اسکریپت دو نوع درخواست را تست می‌کند:
 1. **درخواست مرورگر** - باید HTML برگرداند (proxy به سرور اصلی)
-2. **درخواست کلاینت** - باید کانفیگ‌های ترکیبی JSON برگرداند (با هدر `X-Merged-Configs: true`)
+2. **درخواست کلاینت** - باید کانفیگ‌های ترکیبی JSON برگرداند
 
 همچنین می‌توانید با curl تست کنید:
 
@@ -337,7 +339,7 @@ node test-server.js
 curl -H "Accept: text/html" http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-LAcrFCtzi4J5o-9V4
 
 # تست درخواست کلاینت (کانفیگ‌های ترکیبی)
-curl -H "X-Merged-Configs: true" http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-LAcrFCtzi4J5o-9V4
+curl -H "Accept: application/json" http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-LAcrFCtzi4J5o-9V4
 
 # تست API endpoints (proxy به سرور اصلی)
 curl http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-LAcrFCtzi4J5o-9V4/info
@@ -365,8 +367,8 @@ curl http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV
 
 ### حالت ۲: درخواست از کلاینت (v2rayN, FlClash, ...)
 ```
-1. کلاینت با هدر X-Merged-Configs: true درخواست می‌زند
-2. سرور تشخیص می‌دهد کلاینت کانفیگ‌های ترکیبی می‌خواهد
+1. کلاینت با Accept: application/json یا text/plain درخواست می‌زند
+2. سرور تشخیص می‌دهد این یک کلاینت است (نه مرورگر)
 3. سرور به www.software4you.ir درخواست می‌دهد
 4. کانفیگ‌های JSON دریافت می‌شوند
 5. کانفیگ‌ها بر اساس کشور و تگ گروه‌بندی می‌شوند

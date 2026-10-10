@@ -535,17 +535,14 @@ const server = http.createServer(async (req, res) => {
 
   // Subscription endpoint
   if (req.url.startsWith('/sub/')) {
-    // Check if client wants merged configs (via custom header)
-    const wantMerged = req.headers['x-merged-configs'] === 'true';
-    
-    // Browser request OR client without merged header → Proxy to original server
-    if (isBrowserRequest(req) || !wantMerged) {
+    // Browser request → Proxy to original server
+    if (isBrowserRequest(req)) {
       console.log(`[BROWSER] Proxy mode`);
       proxyRequest(req, res);
       return;
     }
     
-    // Client request with merged header → Process configs
+    // Client request → Process configs
     console.log(`[CLIENT] Processing mode`);
     
     try {
