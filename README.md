@@ -4,24 +4,28 @@
 
 ## 🎯 نحوه کار
 
-### 🔄 Redirect Mode (برای مرورگر)
-- **درخواست مرورگر** → Redirect 302 به سرور اصلی
-- کاربر مستقیماً به صفحه اصلی سرور هدایت می‌شود
-- تمام اطلاعات کاربر، لینک‌ها و اپلیکیشن‌ها نمایش داده می‌شود
+### 🔄 Reverse Proxy Mode (برای مرورگر)
+- **درخواست مرورگر** → Proxy به سرور اصلی
+- صفحه HTML کامل از سرور اصلی دریافت و به مرورگر ارسال می‌شود
+- JavaScript در مرورگر اجرا شده و اطلاعات را از API های سرور اصلی دریافت می‌کند
+- تمام درخواست‌های API (`/info`, `/links`, `/apps`, `/usage`) نیز proxy می‌شوند
+- کاربر صفحه کامل با تمام اطلاعات را می‌بیند
 
 ### 🔀 Config Processing Mode (برای کلاینت)
-- **درخواست کلاینت** → پردازش و ترکیب کانفیگ‌ها
+- **درخواست کلاینت با هدر `X-Merged-Configs: true`** → پردازش و ترکیب کانفیگ‌ها
 - تشخیص خودکار کشور و تگ
 - ساخت balancer leastLoad
 - حفظ FinalMask اصلی
 
 ### منطق پردازش:
 1. کاربر به `http://your-server:3000/sub/<path>` درخواست می‌زند
-2. سرور `Accept` header را بررسی می‌کند:
-   - اگر `text/html` باشد (مرورگر) → **Redirect به سرور اصلی**
-   - اگر نباشد (کلاینت) → **پردازش کانفیگ‌ها**
+2. سرور درخواست را بررسی می‌کند:
+   - اگر `Accept: text/html` باشد (مرورگر) → **Proxy به سرور اصلی**
+   - اگر `X-Merged-Configs: true` باشد (کلاینت) → **پردازش کانفیگ‌ها**
+   - در غیر این صورت → **Proxy به سرور اصلی**
 3. برای مرورگر:
-   - Redirect 302 به `https://www.software4you.ir/sub/<path>`
+   - تمام درخواست‌ها (HTML + API) به سرور اصلی proxy می‌شوند
+   - JavaScript در مرورگر اجرا شده و اطلاعات را از API ها دریافت می‌کند
    - کاربر صفحه کامل با تمام اطلاعات را می‌بیند
 4. برای کلاینت:
    - کانفیگ‌ها از سرور اصلی دریافت می‌شوند
@@ -45,10 +49,18 @@ node --watch server.js
 
 ## 📡 استفاده
 
-### مثال:
+### مرورگر (صفحه اطلاعات کاربر):
 ```
 http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-LAcrFCtzi4J5o-9V4
 ```
+→ صفحه کامل با اطلاعات کاربر، لینک‌ها، اپلیکیشن‌ها و نمودار مصرف
+
+### کلاینت (کانفیگ‌های ترکیبی):
+```bash
+curl -H "Accept: application/json" \
+  http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-LAcrFCtzi4J5o-9V4
+```
+→ کانفیگ‌های JSON ترکیبی با balancer
 
 ### مثال عملی:
 
@@ -66,7 +78,7 @@ http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-L
 ✅ Test-User-01
 ```
 
-**خروجی** (پس از پردازش):
+**خروجی** (پس از پردازش با هدر `X-Merged-Configs: true`):
 ```
 ✅ 🇳🇱 NL [CF] → 3 پروکسی → 1 کانفیگ با balancer
 ✅ 🇳🇱 NL2 [CF] → 2 پروکسی → 1 کانفیگ با balancer (جدا از NL) ← پرچم 🇳🇱 حفظ شد
@@ -191,14 +203,16 @@ cache-control: no-store
 
 ## 🎨 ویژگی‌ها
 
-### 🔄 Redirect Mode (برای مرورگر)
-- ✅ **Redirect 302** به سرور اصلی برای درخواست‌های مرورگر
-- ✅ نمایش کامل صفحه اطلاعات کاربر
-- ✅ تمام لینک‌ها، اپلیکیشن‌ها و QR code ها
-- ✅ بدون نیاز به پردازش اضافی
+### 🔄 Reverse Proxy کامل (برای مرورگر)
+- ✅ **Proxy کامل** تمام درخواست‌ها به سرور اصلی
+- ✅ پشتیبانی از **gzip/deflate decompression**
+- ✅ نمایش کامل صفحه اطلاعات کاربر با JavaScript
+- ✅ تمام API calls (`/info`, `/links`, `/apps`, `/usage`) proxy می‌شوند
+- ✅ تمام لینک‌ها، اپلیکیشن‌ها، QR code ها و نمودار مصرف
+- ✅ بدون نیاز به redirect یا پردازش اضافی
 
 ### 🔀 پردازش کانفیگ (برای کلاینت)
-- ✅ تشخیص خودکار مرورگر از کلاینت (بر اساس Accept header)
+- ✅ تشخیص خودکار مرورگر از کلاینت (بر اساس `Accept` header)
 - ✅ دریافت خودکار از `www.software4you.ir`
 - ✅ تشخیص کشور از flag emoji یا کد 2 حرفی
 - ✅ **حفظ پرچم اصلی** از remarks کانفیگ (حتی برای DE2, NL5, FI10)
@@ -220,6 +234,7 @@ cache-control: no-store
 - ✅ بدون نیاز به dependency خارجی
 - ✅ کاملاً سمت سرور
 - ✅ پشتیبانی از CORS
+- ✅ پشتیبانی از gzip/deflate compression
 
 ## 🔐 Deployment با Nginx + SSL
 
@@ -278,13 +293,17 @@ PORT=8080 node server.js
 
 ## 📝 نکات
 
-### 🔄 Redirect Mode (برای مرورگر)
-- **درخواست مرورگر** - Redirect 302 به سرور اصلی
-- **صفحه کامل** - کاربر تمام اطلاعات کاربر، لینک‌ها و اپلیکیشن‌ها را می‌بیند
-- **بدون پردازش** - سرور اصلی همه چیز را مدیریت می‌کند
-- **سریع و ساده** - بدون نیاز به proxy یا decompression
+### 🔄 Reverse Proxy Mode (برای مرورگر)
+- **درخواست مرورگر** - تمام درخواست‌ها (HTML + API) به سرور اصلی proxy می‌شوند
+- **gzip/deflate decompression** - پاسخ‌های فشرده به صورت خودکار decompress می‌شوند
+- **صفحه کامل** - کاربر تمام اطلاعات کاربر، لینک‌ها، اپلیکیشن‌ها و نمودار مصرف را می‌بیند
+- **API Endpoints** - تمام endpoint های `/sub/{token}/info`, `/links`, `/apps`, `/usage` proxy می‌شوند
+- **بدون redirect** - کاربر در همان دامنه شما می‌ماند
 
 ### 🔀 Config Processing Mode (برای کلاینت)
+- **تشخیص خودکار** - بر اساس `Accept` header
+  - `Accept: text/html` → Proxy به سرور اصلی (مرورگر)
+  - `Accept: application/json` یا `text/plain` → کانفیگ‌های ترکیبی (کلاینت)
 - سرور به صورت خودکار `forsubs.software4you.ir` را به `www.software4you.ir` تبدیل می‌کند
 - **FinalMask اصلی کانفیگ حفظ می‌شود** - سرور هیچ FinalMask جدیدی اضافه نمی‌کند
 - **پرچم اصلی حفظ می‌شود** - حتی برای DE2, NL5, FI10 پرچم 🇩🇪, 🇳🇱, 🇫🇮 از remarks اصلی استخراج می‌شود
@@ -310,35 +329,46 @@ node test-server.js
 ```
 
 این اسکریپت دو نوع درخواست را تست می‌کند:
-1. **درخواست مرورگر** - باید HTML برگرداند
-2. **درخواست کلاینت** - باید JSON برگرداند
+1. **درخواست مرورگر** - باید HTML برگرداند (proxy به سرور اصلی)
+2. **درخواست کلاینت** - باید کانفیگ‌های ترکیبی JSON برگرداند
 
 همچنین می‌توانید با curl تست کنید:
 
 ```bash
-# تست درخواست مرورگر
+# تست درخواست مرورگر (proxy به سرور اصلی)
 curl -H "Accept: text/html" http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-LAcrFCtzi4J5o-9V4
 
-# تست درخواست کلاینت
+# تست درخواست کلاینت (کانفیگ‌های ترکیبی)
 curl -H "Accept: application/json" http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-LAcrFCtzi4J5o-9V4
+
+# تست API endpoints (proxy به سرور اصلی)
+curl http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-LAcrFCtzi4J5o-9V4/info
+curl http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-LAcrFCtzi4J5o-9V4/links
+curl http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-LAcrFCtzi4J5o-9V4/apps
 ```
 
 ## 🔄 گردش کار کامل
 
-### حالت ۱: درخواست از مرورگر (Redirect)
+### حالت ۱: درخواست از مرورگر (Reverse Proxy)
 ```
 1. کاربر لینک را در مرورگر باز می‌کند
 2. سرور تشخیص می‌دهد Accept: text/html
-3. سرور Redirect 302 به سرور اصلی می‌فرستد
-4. مرورگر به www.software4you.ir هدایت می‌شود
-5. کاربر صفحه کامل با تمام اطلاعات را می‌بیند
-6. شامل: اطلاعات کاربر، لینک‌ها، اپلیکیشن‌ها، QR code
+3. درخواست به سرور اصلی proxy می‌شود
+4. HTML اصلی دریافت و به مرورگر ارسال می‌شود
+5. JavaScript در مرورگر اجرا می‌شود
+6. JavaScript به API های سرور اصلی درخواست می‌زند:
+   - /sub/{token}/info → اطلاعات کاربر
+   - /sub/{token}/links → لینک‌های کانفیگ
+   - /sub/{token}/apps → اپلیکیشن‌ها
+   - /sub/{token}/usage → نمودار مصرف
+7. تمام این درخواست‌ها نیز proxy می‌شوند
+8. کاربر صفحه کامل با تمام اطلاعات را می‌بیند
 ```
 
 ### حالت ۲: درخواست از کلاینت (v2rayN, FlClash, ...)
 ```
-1. کلاینت لینک ساب را دریافت می‌کند
-2. سرور تشخیص می‌دهد Accept: text/plain یا application/json
+1. کلاینت با Accept: application/json یا text/plain درخواست می‌زند
+2. سرور تشخیص می‌دهد این یک کلاینت است (نه مرورگر)
 3. سرور به www.software4you.ir درخواست می‌دهد
 4. کانفیگ‌های JSON دریافت می‌شوند
 5. کانفیگ‌ها بر اساس کشور و تگ گروه‌بندی می‌شوند
