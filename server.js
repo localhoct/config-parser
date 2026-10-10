@@ -100,11 +100,37 @@ function proxyRequest(req, res) {
   const proxyReq = https.request(options, (proxyRes) => {
     console.log(`[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage}`);
     
-    // Forward status code
-    res.writeHead(proxyRes.statusCode, proxyRes.headers);
+    const contentType = proxyRes.headers['content-type'] || '';
+    const isHtml = contentType.includes('text/html');
     
-    // Stream the response directly
-    proxyRes.pipe(res, { end: true });
+    // If HTML response, buffer and rewrite links
+    if (isHtml) {
+      const chunks = [];
+      proxyRes.on('data', chunk => chunks.push(chunk));
+      proxyRes.on('end', () => {
+        let html = Buffer.concat(chunks).toString('utf-8');
+        
+        // Rewrite links from original server to our server
+        const ourHost = req.headers['host'] || `localhost:${PORT}`;
+        const ourProtocol = req.headers['x-forwarded-proto'] || 'http';
+        const ourBaseUrl = `${ourProtocol}://${ourHost}`;
+        
+        // Replace all occurrences of original server URLs with our server URL
+        html = html.replace(new RegExp(`https?://${TARGET_HOST}`, 'g'), ourBaseUrl);
+        html = html.replace(/https?:\/\/forsubs\.software4you\.ir/g, ourBaseUrl);
+        
+        // Forward response with modified HTML
+        const responseHeaders = { ...proxyRes.headers };
+        responseHeaders['content-length'] = Buffer.byteLength(html, 'utf-8');
+        
+        res.writeHead(proxyRes.statusCode, responseHeaders);
+        res.end(html);
+      });
+    } else {
+      // For non-HTML responses, stream directly
+      res.writeHead(proxyRes.statusCode, proxyRes.headers);
+      proxyRes.pipe(res, { end: true });
+    }
     
     proxyRes.on('error', (err) => {
       console.error('[PROXY] Response error:', err.message);
