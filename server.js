@@ -89,6 +89,8 @@ function proxyRequest(req, res) {
   delete headers['keep-alive'];
   delete headers['transfer-encoding'];
   
+  console.log('[PROXY] Forwarding headers:', JSON.stringify(headers, null, 2));
+  
   const options = {
     hostname: TARGET_HOST,
     port: 443,
@@ -99,6 +101,7 @@ function proxyRequest(req, res) {
   
   const proxyReq = https.request(options, (proxyRes) => {
     console.log(`[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage}`);
+    console.log('[PROXY] Response headers:', JSON.stringify(proxyRes.headers, null, 2));
     
     const contentType = proxyRes.headers['content-type'] || '';
     const isHtml = contentType.includes('text/html');
