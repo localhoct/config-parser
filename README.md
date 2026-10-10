@@ -98,7 +98,7 @@ http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-L
 - ✅ تشخیص تگ‌ها: [CF], [Direct], [VIP], [FS], ...
 - ✅ ترکیب پروکسی‌های هم‌گروه با balancer `leastLoad`
 - ✅ VIP ها به صورت custom config جداگانه
-- ✅ FinalMask templates (POP3, SMTP, RDP)
+- ✅ حفظ FinalMask اصلی کانفیگ (بدون تغییر)
 - ✅ BurstObservatory برای پینگ خودکار
 - ✅ بدون نیاز به فرانت‌اند
 - ✅ بدون نیاز به CORS proxy
@@ -162,9 +162,9 @@ PORT=8080 node server.js
 ## 📝 نکات
 
 - سرور به صورت خودکار `forsubs.software4you.ir` را به `www.software4you.ir` تبدیل می‌کند
-- FinalMask templates به صورت چرخشی به outbound های TCP اضافه می‌شوند
+- **FinalMask اصلی کانفیگ حفظ می‌شود** - سرور هیچ FinalMask جدیدی اضافه نمی‌کند
 - اگر فقط یک پروکسی در گروه باشد، balancer حذف می‌شود
-- کانفیگ‌های VIP هیچ تغییری نمی‌کنند (فقط FinalMask اضافه می‌شود)
+- کانفیگ‌های VIP هیچ تغییری نمی‌کنند (فقط outbound اصلی با همان تنظیمات)
 
 ## 🐛 عیب‌یابی
 
