@@ -25,6 +25,7 @@
       {
         "key": "NL_CF",
         "remarks": "🇳🇱 NL [CF]",
+        "flag_source": "extracted from original remarks",
         "proxy_count": 3,
         "has_balancer": true,
         "outbound_tags": ["proxy", "proxy-2", "proxy-3"]
@@ -32,6 +33,7 @@
       {
         "key": "NL2_CF",
         "remarks": "🇳🇱 NL2 [CF]",
+        "flag_source": "extracted from original remarks (🇳🇱)",
         "proxy_count": 2,
         "has_balancer": true,
         "outbound_tags": ["proxy", "proxy-2"]
@@ -39,6 +41,7 @@
       {
         "key": "FI_Direct",
         "remarks": "🇫🇮 FI [Direct]",
+        "flag_source": "extracted from original remarks",
         "proxy_count": 2,
         "has_balancer": true,
         "outbound_tags": ["proxy", "proxy-2"]
@@ -46,6 +49,7 @@
       {
         "key": "FI2_Direct",
         "remarks": "🇫🇮 FI2 [Direct]",
+        "flag_source": "extracted from original remarks (🇫🇮)",
         "proxy_count": 1,
         "has_balancer": false,
         "outbound_tags": ["proxy"]
