@@ -1,93 +1,58 @@
-# Config Merger - نسخه ساده (بدون سرور)
+# Config Merger Server
 
-## 🎯 معرفی
+سرور ساده Node.js که ساب‌لینک پروکسی‌ها را دریافت و بر اساس کشور و تگ ترکیب می‌کند.
 
-یک ابزار فرانت‌اند ساده که ساب‌لینک پروکسی‌ها را دریافت کرده و بر اساس **کشور** و **تگ** ([CF], [Direct], [FS]) گروه‌بندی و ترکیب می‌کند.
+## 🎯 نحوه کار
 
-## 🔄 منطق کار
+1. کاربر به `http://your-server:3000/sub/<path>` درخواست می‌زند
+2. سرور به `https://www.software4you.ir/sub/<path>` درخواست می‌دهد
+3. کانفیگ‌های JSON را دریافت می‌کند
+4. بر اساس کشور (DE, NL, FI, ...) و تگ ([CF], [Direct], [FS]) گروه‌بندی می‌کند
+5. هر گروه را با balancer `leastLoad` ترکیب می‌کند
+6. کانفیگ‌های VIP را جداگانه خروجی می‌دهد
+7. نتیجه را به کاربر برمی‌گرداند
 
-### ورودی:
+## 🚀 نصب و اجرا
+
+```bash
+# نصب (نیازی به پکیج اضافی نیست)
+# فقط Node.js 18+ نیاز است
+
+# اجرا
+node server.js
+
+# یا با watch mode (برای توسعه)
+node --watch server.js
 ```
-https://forsubs.software4you.ir/sub/...
-```
 
-### تبدیل به:
-```
-https://www.software4you.ir/sub/...
-```
+## 📡 استفاده
 
-### پردازش:
-1. تمام کانفیگ‌ها از ساب‌لینک دریافت می‌شوند
-2. هر کانفیگ بر اساس نام دسته‌بندی می‌شود:
-   - **کشور**: از flag emoji یا کد 2 حرفی (DE, NL, FI, US, ...)
-   - **تگ**: از براکت [CF], [Direct], [FS], ...
-   - **VIP**: اگر `[VIP]` در نام باشد
+### مثال:
+```
+http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-LAcrFCtzi4J5o-9V4
+```
 
 ### خروجی:
+آرایه‌ای از کانفیگ‌های JSON که هر کدام شامل:
+- **گروه‌های ترکیبی**: چندین outbound با balancer leastLoad
+- **کانفیگ‌های VIP**: تک outbound بدون balancer
 
-#### گروه‌های ترکیبی (با Balancer):
-```
-🇳🇱 NL [CF]    → 5 پروکسی → 1 کانفیگ با balancer leastLoad
-🇩🇪 DE [Direct] → 3 پروکسی → 1 کانفیگ با balancer leastLoad
-🇫🇮 FI [CF]    → 2 پروکسی → 1 کانفیگ با balancer leastLoad
-```
+## 🔧 منطق گروه‌بندی
 
-#### کانفیگ‌های VIP (بدون ترکیب):
+### گروه‌های ترکیبی (با Balancer):
 ```
-🇩🇪 DE • [VIP] 🔥🚀 → 1 کانفیگ جداگانه (Custom Config)
-🇺🇸 US • [VIP] 🔥🚀 → 1 کانفیگ جداگانه (Custom Config)
-🇳🇱 NL • [VIP] 🔥🚀 → 1 کانفیگ جداگانه (Custom Config)
+🇳🇱 NL [CF]     → تمام پروکسی‌های NL با تگ [CF] → 1 کانفیگ با balancer
+🇩🇪 DE [Direct]  → تمام پروکسی‌های DE با تگ [Direct] → 1 کانفیگ با balancer
+🇫🇮 FI [CF]     → تمام پروکسی‌های FI با تگ [CF] → 1 کانفیگ با balancer
 ```
 
-## 📦 ساختار
-
+### کانفیگ‌های VIP (بدون ترکیب):
 ```
-├── src/
-│   ├── App.tsx              # UI اصلی
-│   ├── utils/
-│   │   ├── proxyParser.ts   # Parse لینک‌ها + استخراج کشور/تگ
-│   │   ├── subscription.ts  # Fetch ساب‌لینک + گروه‌بندی
-│   │   └── configBuilder.ts # ساخت کانفیگ Xray با FinalMask
-│   └── index.css
-├── index.html
-└── dist/                    # خروجی build
+🇩🇪 DE • [VIP] 🔥🚀 → 1 کانفیگ جداگانه
+🇺🇸 US • [VIP] 🔥🚀 → 1 کانفیگ جداگانه
 ```
 
-## 🚀 استفاده
-
-### روش ۱: اجرای محلی
-```bash
-npm install
-npm run dev
-```
-
-### روش ۲: Build و Deploy
-```bash
-npm install
-npm run build
-# فایل‌های dist/ را روی هر web server بگذارید
-```
-
-### روش ۳: استفاده مستقیم
-1. ساب‌لینک خود را وارد کنید
-2. دکمه "دریافت و پردازش" را بزنید
-3. در تب "ترکیبی" گروه‌های [CF], [Direct], [FS] را ببینید
-4. در تب "VIP" کانفیگ‌های VIP را ببینید
-5. هر کدام را انتخاب و JSON/Base64 کپی کنید
-6. در کلاینت (v2rayN, FlClash, v2rayNG) import کنید
-
-## 🎨 ویژگی‌ها
-
-- ✅ تشخیص خودکار کشور از flag emoji یا کد
-- ✅ تشخیص تگ‌ها: [CF], [Direct], [VIP], [FS], ...
-- ✅ ترکیب پروکسی‌های هم‌گروه با balancer `leastLoad`
-- ✅ VIP ها به صورت custom config جداگانه
-- ✅ FinalMask templates (POP3, SMTP, RDP)
-- ✅ BurstObservatory برای پینگ خودکار
-- ✅ خروجی JSON یا Base64
-- ✅ بدون نیاز به سرور (کاملاً client-side)
-
-## 🔧 کانفیگ خروجی
+## 📦 ساختار کانفیگ خروجی
 
 ### گروه ترکیبی:
 ```json
@@ -104,7 +69,7 @@ npm run build
     "balancers": [{
       "tag": "auto",
       "selector": ["proxy", "proxy-2", "proxy-3"],
-      "strategy": { "type": "leastLoad", ... }
+      "strategy": { "type": "leastLoad" }
     }],
     "rules": [{ "balancerTag": "auto" }]
   }
@@ -126,25 +91,94 @@ npm run build
 }
 ```
 
-## ⚠️ نکات
+## 🎨 ویژگی‌ها
 
-- برای fetch ساب‌لینک از CORS proxy استفاده می‌شود (اگر سرور CORS نداشته باشد)
-- اگر CORS کار نکرد، از تب "لینک خام" استفاده کنید
-- FinalMask templates به صورت چرخشی به outbound های TCP اضافه می‌شوند
-- اگر فقط یک پروکسی در گروه باشد، balancer حذف می‌شود
+- ✅ دریافت خودکار از `www.software4you.ir`
+- ✅ تشخیص کشور از flag emoji یا کد 2 حرفی
+- ✅ تشخیص تگ‌ها: [CF], [Direct], [VIP], [FS], ...
+- ✅ ترکیب پروکسی‌های هم‌گروه با balancer `leastLoad`
+- ✅ VIP ها به صورت custom config جداگانه
+- ✅ FinalMask templates (POP3, SMTP, RDP)
+- ✅ BurstObservatory برای پینگ خودکار
+- ✅ بدون نیاز به فرانت‌اند
+- ✅ بدون نیاز به CORS proxy
+- ✅ کاملاً سمت سرور
 
-## 📱 کلاینت‌های پشتیبانی شده
+## 🔐 Deployment با Nginx + SSL
 
-- **v2rayN** (Windows): فایل → وارد کردن → از کلیپ‌بورد
-- **v2rayNG** (Android): افزودن از کلیپ‌بورد
-- **FlClash** (Cross-platform): پروفایل → افزودن → Local
-- **Streisand** (iOS): افزودن از لینک
-- **V2Box** (iOS/Android): افزودن از کلیپ‌بورد
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name forsubs.yourdomain.com;
+
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+
+    location /sub/ {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Subscription headers
+        add_header Content-Type 'application/json; charset=utf-8';
+        add_header Profile-Update-Interval '24';
+    }
+}
+```
+
+## 📱 استفاده در کلاینت
+
+لینک ساب نهایی:
+```
+https://forsubs.yourdomain.com/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-LAcrFCtzi4J5o-9V4
+```
+
+این لینک را در کلاینت‌های زیر وارد کنید:
+- **v2rayN** (Windows)
+- **v2rayNG** (Android)
+- **FlClash** (Cross-platform)
+- **Streisand** (iOS)
+- **V2Box** (iOS/Android)
+
+## ⚙️ تنظیمات
+
+### تغییر پورت:
+```bash
+PORT=8080 node server.js
+```
+
+### Environment Variables:
+- `PORT`: پورت سرور (پیش‌فرض: 3000)
 
 ## 🛠️ تکنولوژی‌ها
 
-- React 18
-- TypeScript
-- Tailwind CSS 4
-- Vite
+- Node.js (بدون dependency خارجی)
+- HTTP/HTTPS modules
 - Xray Core config format
+
+## 📝 نکات
+
+- سرور به صورت خودکار `forsubs.software4you.ir` را به `www.software4you.ir` تبدیل می‌کند
+- FinalMask templates به صورت چرخشی به outbound های TCP اضافه می‌شوند
+- اگر فقط یک پروکسی در گروه باشد، balancer حذف می‌شود
+- کانفیگ‌های VIP هیچ تغییری نمی‌کنند (فقط FinalMask اضافه می‌شود)
+
+## 🐛 عیب‌یابی
+
+### خطا در دریافت ساب‌لینک:
+```
+Error: Failed to parse subscription data
+```
+- بررسی کنید که ساب‌لینک معتبر است
+- بررسی کنید که `www.software4you.ir` در دسترس است
+
+### خروجی خالی:
+- بررسی کنید که ساب‌لینک شامل کانفیگ‌های JSON است
+- لاگ سرور را بررسی کنید
+
+## 📄 لایسنس
+
+MIT
