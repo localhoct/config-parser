@@ -43,11 +43,17 @@ http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-L
 ```
 🇳🇱 NL [CF]      → تمام پروکسی‌های NL با تگ [CF] → 1 کانفیگ با balancer
 🇳🇱 NL2 [CF]     → تمام پروکسی‌های NL2 با تگ [CF] → 1 کانفیگ با balancer (جدا از NL)
+🇳🇱 NL5 [CF]     → تمام پروکسی‌های NL5 با تگ [CF] → 1 کانفیگ با balancer (جدا از NL و NL2)
 🇩🇪 DE [Direct]   → تمام پروکسی‌های DE با تگ [Direct] → 1 کانفیگ با balancer
 🇩🇪 DE2 [Direct]  → تمام پروکسی‌های DE2 با تگ [Direct] → 1 کانفیگ با balancer (جدا از DE)
 🇩🇪 DE3 [Direct]  → تمام پروکسی‌های DE3 با تگ [Direct] → 1 کانفیگ با balancer (جدا از DE و DE2)
+🇩🇪 DE10 [Direct] → تمام پروکسی‌های DE10 با تگ [Direct] → 1 کانفیگ با balancer
 🇫🇮 FI [CF]      → تمام پروکسی‌های FI با تگ [CF] → 1 کانفیگ با balancer
+🇯🇵 JP5 [FS]     → تمام پروکسی‌های JP5 با تگ [FS] → 1 کانفیگ با balancer
+🇬🇧 GB2 [VIP]    → تمام پروکسی‌های GB2 با تگ [VIP] → 1 کانفیگ با balancer
 ```
+
+**نکته**: هر کشور با هر عددی (1، 2، 3، 10، ...) به صورت جداگانه گروه‌بندی می‌شود. این برای همه کشورها اعمال می‌شود.
 
 ### کانفیگ‌های VIP (بدون ترکیب):
 ```

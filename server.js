@@ -16,31 +16,41 @@ function getFlag(code) {
   return FLAGS[code] || '🌐';
 }
 
-// Extract country code from remarks (including numbers like DE2, DE3)
+// Extract country code from remarks (including numbers like DE2, DE3, NL5, etc.)
 function extractCountry(remarks) {
-  // Flag emoji
+  // First, try to extract base country code from flag emoji
   const flagPattern = /[\u{1F1E0}-\u{1F1FF}]{2}/u;
   const flagMatch = remarks.match(flagPattern);
+  let baseCode = null;
+  
   if (flagMatch) {
     const codePoints = [...flagMatch[0]].map(c => c.codePointAt(0) - 0x1F1E6 + 65);
-    const baseCode = String.fromCharCode(...codePoints);
-    
-    // Check for number after the code (e.g., DE2, DE3, NL2)
-    const numberMatch = remarks.match(new RegExp(`${baseCode}(\\d+)`));
-    if (numberMatch) {
-      return `${baseCode}${numberMatch[1]}`;
-    }
-    
-    return baseCode;
+    baseCode = String.fromCharCode(...codePoints);
   }
   
-  // Text code with optional number
-  const knownCodes = ['DE', 'NL', 'FI', 'US', 'CA', 'SE', 'TR', 'FR', 'GB', 'JP', 'KR', 'SG'];
-  for (const code of knownCodes) {
-    const match = remarks.match(new RegExp(`${code}(\\d+)?`));
-    if (match) {
-      return match[1] ? `${code}${match[1]}` : code;
+  // Now search for country code pattern: 2 letters + optional number
+  // This works for all countries, not just a predefined list
+  const countryCodePattern = /\b([A-Z]{2})(\d*)\b/;
+  const match = remarks.match(countryCodePattern);
+  
+  if (match) {
+    const code = match[1];
+    const number = match[2];
+    
+    // If we have a base code from flag, verify it matches
+    if (baseCode && code === baseCode) {
+      return number ? `${code}${number}` : code;
     }
+    
+    // If no flag or codes don't match, use the text pattern
+    if (!baseCode) {
+      return number ? `${code}${number}` : code;
+    }
+  }
+  
+  // Fallback to flag emoji base code
+  if (baseCode) {
+    return baseCode;
   }
   
   return 'OTHER';
