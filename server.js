@@ -10,10 +10,25 @@ const FLAGS = {
   'DE': '🇩🇪', 'NL': '🇳🇱', 'FI': '🇫🇮', 'US': '🇺🇸',
   'CA': '🇨🇦', 'SE': '🇸🇪', 'TR': '🇹🇷', 'FR': '🇫🇷',
   'GB': '🇬🇧', 'JP': '🇯🇵', 'KR': '🇰🇷', 'SG': '🇸🇬',
+  'AU': '🇦🇺', 'BR': '🇧🇷', 'IN': '🇮🇳', 'RU': '🇷🇺',
+  'IT': '🇮🇹', 'ES': '🇪🇸', 'AT': '🇦🇹', 'CH': '🇨🇭',
 };
 
-function getFlag(code) {
-  return FLAGS[code] || '🌐';
+function getFlag(code, remarks) {
+  // First, try to extract flag emoji from original remarks
+  if (remarks) {
+    const flagPattern = /[\u{1F1E0}-\u{1F1FF}]{2}/u;
+    const flagMatch = remarks.match(flagPattern);
+    if (flagMatch) {
+      return flagMatch[0];
+    }
+  }
+  
+  // Extract base country code (remove numbers)
+  const baseCode = code.replace(/\d+$/, '');
+  
+  // Return flag for base code
+  return FLAGS[baseCode] || '🌐';
 }
 
 // Extract country code from remarks (including numbers like DE2, DE3, NL5, etc.)
@@ -112,7 +127,8 @@ function fetchSubscription(path) {
 
 // Build merged config with balancer
 function buildMergedConfig(country, tag, configs) {
-  const flag = getFlag(country);
+  // Get flag from first config's remarks
+  const flag = getFlag(country, configs[0]?.remarks);
   const outbounds = [];
   const proxyTags = [];
 
@@ -185,8 +201,11 @@ function buildSingleConfig(config) {
   
   // DO NOT modify finalmask - keep whatever the original config had
 
+  // Get flag from original remarks
+  const flag = getFlag(extractCountry(config.remarks || ''), config.remarks);
+
   return {
-    remarks: config.remarks || 'VIP Config',
+    remarks: config.remarks || `${flag} VIP Config`,
     log: { loglevel: 'warning' },
     dns: { servers: ['1.1.1.1', '8.8.8.8'] },
     inbounds: [
