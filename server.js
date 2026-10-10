@@ -73,31 +73,59 @@ function buildGroupKey(remarks) {
 }
 
 // ========== HTTP Requests ==========
-function fetchHtmlPage(path) {
+function fetchHtmlPage(path, reqHeaders = {}) {
   return new Promise((resolve, reject) => {
     const url = `https://www.software4you.ir${path}`;
-    https.get(url, { 
-      headers: { 
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-      } 
-    }, (res) => {
+    
+    // Pass through browser headers
+    const headers = {
+      'User-Agent': reqHeaders['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': reqHeaders['accept'] || 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+      'Accept-Language': reqHeaders['accept-language'] || 'en-US,en;q=0.9,fa;q=0.8',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Connection': 'keep-alive',
+      'Upgrade-Insecure-Requests': '1',
+      'Sec-Fetch-Dest': reqHeaders['sec-fetch-dest'] || 'document',
+      'Sec-Fetch-Mode': reqHeaders['sec-fetch-mode'] || 'navigate',
+      'Sec-Fetch-Site': reqHeaders['sec-fetch-site'] || 'none',
+      'Sec-Fetch-User': reqHeaders['sec-fetch-user'] || '?1',
+    };
+    
+    // Add Referer if exists
+    if (reqHeaders['referer']) headers['Referer'] = reqHeaders['referer'];
+    
+    const options = {
+      method: 'GET',
+      headers: headers,
+      followRedirects: true,
+    };
+    
+    https.get(url, options, (res) => {
+      // Handle redirects
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        // Follow redirect
+        const redirectUrl = new URL(res.headers.location, url);
+        https.get(redirectUrl.toString(), options, (redirectRes) => {
+          let data = '';
+          redirectRes.on('data', chunk => data += chunk);
+          redirectRes.on('end', () => {
+            resolve({ 
+              html: data, 
+              statusCode: redirectRes.statusCode,
+              headers: redirectRes.headers
+            });
+          });
+        }).on('error', reject);
+        return;
+      }
+      
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
         resolve({ 
           html: data, 
-          headers: {
-            'subscription-userinfo': res.headers['subscription-userinfo'],
-            'profile-update-interval': res.headers['profile-update-interval'],
-            'profile-title': res.headers['profile-title'],
-            'profile-web-page-url': res.headers['profile-web-page-url'],
-            'support-url': res.headers['support-url'],
-            'content-disposition': res.headers['content-disposition'],
-            'announce': res.headers['announce'],
-            'announce-url': res.headers['announce-url'],
-            'cache-control': res.headers['cache-control'],
-          }
+          statusCode: res.statusCode,
+          headers: res.headers
         });
       });
     }).on('error', reject);
@@ -108,53 +136,78 @@ function fetchSubscription(path) {
   return new Promise((resolve, reject) => {
     const url = `https://www.software4you.ir${path}`;
     https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        const originalHeaders = {
-          'subscription-userinfo': res.headers['subscription-userinfo'],
-          'profile-update-interval': res.headers['profile-update-interval'],
-          'profile-title': res.headers['profile-title'],
-          'profile-web-page-url': res.headers['profile-web-page-url'],
-          'support-url': res.headers['support-url'],
-          'content-disposition': res.headers['content-disposition'],
-          'announce': res.headers['announce'],
-          'announce-url': res.headers['announce-url'],
-        };
-        
-        // Try JSON
-        try {
-          const configs = JSON.parse(data);
-          resolve({ configs: Array.isArray(configs) ? configs : [configs], headers: originalHeaders });
-          return;
-        } catch {}
-        
-        // Try base64
-        try {
-          const decoded = Buffer.from(data.replace(/\s/g, ''), 'base64').toString('utf-8');
-          try {
-            const configs = JSON.parse(decoded);
-            resolve({ configs: Array.isArray(configs) ? configs : [configs], headers: originalHeaders });
-            return;
-          } catch {}
-          
-          if (decoded.includes('://')) {
-            const lines = decoded.split('\n').filter(line => line.trim().length > 0);
-            resolve({ configs: parseProxyLinks(lines), headers: originalHeaders });
-            return;
-          }
-        } catch {}
-        
-        // Try plain text
-        if (data.includes('://')) {
-          const lines = data.split('\n').filter(line => line.trim().length > 0);
-          resolve({ configs: parseProxyLinks(lines), headers: originalHeaders });
-          return;
-        }
-        
-        reject(new Error('Failed to parse subscription data - unknown format'));
-      });
+      // Handle redirects
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        const redirectUrl = new URL(res.headers.location, url);
+        https.get(redirectUrl.toString(), { headers: { 'User-Agent': 'Mozilla/5.0' } }, (redirectRes) => {
+          processSubscriptionResponse(redirectRes, resolve, reject);
+        }).on('error', reject);
+        return;
+      }
+      
+      processSubscriptionResponse(res, resolve, reject);
     }).on('error', reject);
+  });
+}
+
+function processSubscriptionResponse(res, resolve, reject) {
+  let data = '';
+  res.on('data', chunk => data += chunk);
+  res.on('end', () => {
+    // Extract ALL important headers from original server
+    const originalHeaders = {};
+    
+    // Copy all relevant headers
+    const headerKeys = [
+      'subscription-userinfo',
+      'profile-update-interval',
+      'profile-title',
+      'profile-web-page-url',
+      'support-url',
+      'content-disposition',
+      'announce',
+      'announce-url',
+      'cache-control',
+      'content-type',
+    ];
+    
+    headerKeys.forEach(key => {
+      if (res.headers[key]) {
+        originalHeaders[key] = res.headers[key];
+      }
+    });
+    
+    // Try JSON
+    try {
+      const configs = JSON.parse(data);
+      resolve({ configs: Array.isArray(configs) ? configs : [configs], headers: originalHeaders });
+      return;
+    } catch {}
+    
+    // Try base64
+    try {
+      const decoded = Buffer.from(data.replace(/\s/g, ''), 'base64').toString('utf-8');
+      try {
+        const configs = JSON.parse(decoded);
+        resolve({ configs: Array.isArray(configs) ? configs : [configs], headers: originalHeaders });
+        return;
+      } catch {}
+      
+      if (decoded.includes('://')) {
+        const lines = decoded.split('\n').filter(line => line.trim().length > 0);
+        resolve({ configs: parseProxyLinks(lines), headers: originalHeaders });
+        return;
+      }
+    } catch {}
+    
+    // Try plain text
+    if (data.includes('://')) {
+      const lines = data.split('\n').filter(line => line.trim().length > 0);
+      resolve({ configs: parseProxyLinks(lines), headers: originalHeaders });
+      return;
+    }
+    
+    reject(new Error('Failed to parse subscription data - unknown format'));
   });
 }
 
@@ -447,14 +500,30 @@ const server = http.createServer(async (req, res) => {
       if (isBrowser) {
         console.log(`Fetching HTML page from: https://www.software4you.ir${path}`);
         try {
-          const { html, headers } = await fetchHtmlPage(path);
-          const responseHeaders = { 'Content-Type': 'text/html; charset=utf-8' };
+          // Pass browser headers to original server
+          const { html, statusCode, headers } = await fetchHtmlPage(path, req.headers);
           
+          // Build response headers - pass through ALL headers from original server
+          const responseHeaders = {};
+          
+          // Copy all headers from original response
           Object.entries(headers).forEach(([key, value]) => {
-            if (value) responseHeaders[key] = value;
+            if (value !== undefined && value !== null) {
+              // Skip hop-by-hop headers
+              const skipHeaders = ['transfer-encoding', 'connection', 'keep-alive', 'te', 'trailer', 'upgrade'];
+              if (!skipHeaders.includes(key.toLowerCase())) {
+                responseHeaders[key] = value;
+              }
+            }
           });
           
-          res.writeHead(200, responseHeaders);
+          // Ensure Content-Type is set
+          if (!responseHeaders['content-type']) {
+            responseHeaders['Content-Type'] = 'text/html; charset=utf-8';
+          }
+          
+          console.log(`Returning HTML page with status ${statusCode}`);
+          res.writeHead(statusCode || 200, responseHeaders);
           res.end(html);
         } catch (err) {
           console.error('Failed to fetch HTML page:', err.message);

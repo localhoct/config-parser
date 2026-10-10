@@ -262,8 +262,37 @@ PORT=8080 node server.js
 - **ایموجی و نام‌ها دست نمی‌خورند** - تمام remarks اصلی حفظ می‌شوند
 - **کانفیگ‌های منقضی شده** (حجم تمام شده، تاریخ تمام شده) دقیقاً همانطور که هستند برگردانده می‌شوند
 - **هدرهای اصلی سرور پاس داده می‌شوند** - subscription-userinfo, profile-update-interval, profile-title و...
+- **درخواست مرورگر** - تمام headers از سرور اصلی pass-through می‌شود (دقیقاً همان صفحه HTML)
+- **پشتیبانی از Redirect** - اگر سرور اصلی redirect کند، سرور ما هم follow می‌کند
+- **پشتیبانی از چندین فرمت** - JSON، Base64، Plain text links
 - اگر فقط یک پروکسی در گروه باشد، balancer حذف می‌شود
 - کانفیگ‌های VIP هیچ تغییری نمی‌کنند (فقط outbound اصلی با همان تنظیمات)
+
+## 🧪 تست سرور
+
+برای تست سرور، از اسکریپت `test-server.js` استفاده کنید:
+
+```bash
+# ابتدا سرور را اجرا کنید
+node server.js
+
+# در یک ترمینال دیگر، تست را اجرا کنید
+node test-server.js
+```
+
+این اسکریپت دو نوع درخواست را تست می‌کند:
+1. **درخواست مرورگر** - باید HTML برگرداند
+2. **درخواست کلاینت** - باید JSON برگرداند
+
+همچنین می‌توانید با curl تست کنید:
+
+```bash
+# تست درخواست مرورگر
+curl -H "Accept: text/html" http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-LAcrFCtzi4J5o-9V4
+
+# تست درخواست کلاینت
+curl -H "Accept: application/json" http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-LAcrFCtzi4J5o-9V4
+```
 
 ## 🔄 گردش کار کامل
 
