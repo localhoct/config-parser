@@ -3,6 +3,7 @@
 
 const http = require('http');
 const https = require('https');
+const zlib = require('zlib');
 const { URL } = require('url');
 
 const PORT = process.env.PORT || 3000;
@@ -88,8 +89,11 @@ function proxyRequest(req, res) {
   delete headers['connection'];
   delete headers['keep-alive'];
   delete headers['transfer-encoding'];
-  // Remove Accept-Encoding to get uncompressed response
-  delete headers['accept-encoding'];
+  
+  // Keep Accept-Encoding for gzip support
+  if (!headers['accept-encoding']) {
+    headers['accept-encoding'] = 'gzip, deflate';
+  }
   
   console.log('[PROXY] Forwarding headers:', JSON.stringify(headers, null, 2));
   
@@ -106,14 +110,25 @@ function proxyRequest(req, res) {
     console.log('[PROXY] Response headers:', JSON.stringify(proxyRes.headers, null, 2));
     
     const contentType = proxyRes.headers['content-type'] || '';
+    const contentEncoding = proxyRes.headers['content-encoding'] || '';
     const isHtml = contentType.includes('text/html');
+    
+    // Determine decompression stream
+    let stream = proxyRes;
+    if (contentEncoding.includes('gzip')) {
+      stream = proxyRes.pipe(zlib.createGunzip());
+    } else if (contentEncoding.includes('deflate')) {
+      stream = proxyRes.pipe(zlib.createInflate());
+    }
     
     // If HTML response, buffer and rewrite links
     if (isHtml) {
       const chunks = [];
-      proxyRes.on('data', chunk => chunks.push(chunk));
-      proxyRes.on('end', () => {
+      stream.on('data', chunk => chunks.push(chunk));
+      stream.on('end', () => {
         let html = Buffer.concat(chunks).toString('utf-8');
+        
+        console.log(`[PROXY] HTML size: ${html.length} bytes`);
         
         // Rewrite links from original server to our server
         const ourHost = req.headers['host'] || `localhost:${PORT}`;
@@ -126,6 +141,8 @@ function proxyRequest(req, res) {
         
         // Forward response with modified HTML
         const responseHeaders = { ...proxyRes.headers };
+        delete responseHeaders['content-encoding'];
+        delete responseHeaders['content-length'];
         responseHeaders['content-length'] = Buffer.byteLength(html, 'utf-8');
         
         res.writeHead(proxyRes.statusCode, responseHeaders);
@@ -134,11 +151,11 @@ function proxyRequest(req, res) {
     } else {
       // For non-HTML responses, stream directly
       res.writeHead(proxyRes.statusCode, proxyRes.headers);
-      proxyRes.pipe(res, { end: true });
+      stream.pipe(res, { end: true });
     }
     
-    proxyRes.on('error', (err) => {
-      console.error('[PROXY] Response error:', err.message);
+    stream.on('error', (err) => {
+      console.error('[PROXY] Stream error:', err.message);
       if (!res.headersSent) {
         res.writeHead(502);
       }
