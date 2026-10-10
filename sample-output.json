@@ -1,0 +1,81 @@
+{
+  "description": "نمونه خروجی سرور Config Merger",
+  "input": {
+    "source": "https://www.software4you.ir/sub/...",
+    "total_configs": 13,
+    "sample_configs": [
+      { "remarks": "🇩🇪 DE • [VIP] 🔥🚀", "type": "VIP" },
+      { "remarks": "🇩🇪 DE2 • [VIP] 🔥🚀", "type": "VIP" },
+      { "remarks": "🇩🇪 DE3 • [VIP] 🔥🚀", "type": "VIP" },
+      { "remarks": "🇳🇱 NL [CF]", "type": "proxy" },
+      { "remarks": "🇳🇱 NL [CF]", "type": "proxy" },
+      { "remarks": "🇳🇱 NL [CF]", "type": "proxy" },
+      { "remarks": "🇳🇱 NL2 [CF]", "type": "proxy" },
+      { "remarks": "🇳🇱 NL2 [CF]", "type": "proxy" },
+      { "remarks": "🇫🇮 FI [Direct]", "type": "proxy" },
+      { "remarks": "🇫🇮 FI [Direct]", "type": "proxy" },
+      { "remarks": "🇫🇮 FI2 [Direct]", "type": "proxy" },
+      { "remarks": "⏳ (5.2 GB) / (10 GB)", "type": "user_info" },
+      { "remarks": "📅 2026-12-31 • 45 days left", "type": "user_info" }
+    ]
+  },
+  "output": {
+    "total_configs": 10,
+    "merged_groups": [
+      {
+        "key": "NL_CF",
+        "remarks": "🇳🇱 NL [CF]",
+        "proxy_count": 3,
+        "has_balancer": true,
+        "outbound_tags": ["proxy", "proxy-2", "proxy-3"]
+      },
+      {
+        "key": "NL2_CF",
+        "remarks": "🇳🇱 NL2 [CF]",
+        "proxy_count": 2,
+        "has_balancer": true,
+        "outbound_tags": ["proxy", "proxy-2"]
+      },
+      {
+        "key": "FI_Direct",
+        "remarks": "🇫🇮 FI [Direct]",
+        "proxy_count": 2,
+        "has_balancer": true,
+        "outbound_tags": ["proxy", "proxy-2"]
+      },
+      {
+        "key": "FI2_Direct",
+        "remarks": "🇫🇮 FI2 [Direct]",
+        "proxy_count": 1,
+        "has_balancer": false,
+        "outbound_tags": ["proxy"]
+      }
+    ],
+    "vip_configs": [
+      { "remarks": "🇩🇪 DE • [VIP] 🔥🚀", "single_outbound": true },
+      { "remarks": "🇩🇪 DE2 • [VIP] 🔥🚀", "single_outbound": true },
+      { "remarks": "🇩🇪 DE3 • [VIP] 🔥🚀", "single_outbound": true }
+    ],
+    "passthrough_configs": [
+      { "remarks": "⏳ (5.2 GB) / (10 GB)", "unchanged": true },
+      { "remarks": "📅 2026-12-31 • 45 days left", "unchanged": true }
+    ]
+  },
+  "summary": {
+    "input_count": 13,
+    "output_count": 10,
+    "merged_groups": 4,
+    "vip_configs": 3,
+    "passthrough_configs": 2,
+    "countries_detected": ["DE", "DE2", "DE3", "NL", "NL2", "FI", "FI2"],
+    "tags_detected": ["VIP", "CF", "Direct"],
+    "notes": [
+      "DE, DE2, DE3 به صورت جداگانه گروه‌بندی شدند",
+      "NL و NL2 به صورت جداگانه گروه‌بندی شدند",
+      "FI و FI2 به صورت جداگانه گروه‌بندی شدند",
+      "اطلاعات کاربر بدون تغییر در انتهای خروجی",
+      "FinalMask اصلی کانفیگ‌ها حفظ شد",
+      "ایموجی‌ها و نام‌ها دست نخوردند"
+    ]
+  }
+}

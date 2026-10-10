@@ -32,10 +32,41 @@ node --watch server.js
 http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-LAcrFCtzi4J5o-9V4
 ```
 
+### مثال عملی:
+
+**ورودی** (از سرور اصلی):
+```
+🇩🇪 DE • [VIP] 🔥🚀
+🇩🇪 DE2 • [VIP] 🔥🚀
+🇩🇪 DE3 • [VIP] 🔥🚀
+🇳🇱 NL [CF] (3x)
+🇳🇱 NL2 [CF] (2x)
+🇫🇮 FI [Direct] (2x)
+🇫🇮 FI2 [Direct] (1x)
+⏳ (5.2 GB) / (10 GB)
+📅 2026-12-31 • 45 days left
+✅ Test-User-01
+```
+
+**خروجی** (پس از پردازش):
+```
+✅ 🇳🇱 NL [CF] → 3 پروکسی → 1 کانفیگ با balancer
+✅ 🇳🇱 NL2 [CF] → 2 پروکسی → 1 کانفیگ با balancer (جدا از NL)
+✅ 🇫🇮 FI [Direct] → 2 پروکسی → 1 کانفیگ با balancer
+✅ 🇫🇮 FI2 [Direct] → 1 پروکسی → 1 کانفیگ بدون balancer (جدا از FI)
+✅ 🇩🇪 DE • [VIP] → 1 کانفیگ جداگانه
+✅ 🇩🇪 DE2 • [VIP] → 1 کانفیگ جداگانه (جدا از DE)
+✅ 🇩🇪 DE3 • [VIP] → 1 کانفیگ جداگانه (جدا از DE و DE2)
+✅ ⏳ (5.2 GB) / (10 GB) → بدون تغییر
+✅ 📅 2026-12-31 • 45 days left → بدون تغییر
+✅ ✅ Test-User-01 → بدون تغییر
+```
+
 ### خروجی:
 آرایه‌ای از کانفیگ‌های JSON که هر کدام شامل:
 - **گروه‌های ترکیبی**: چندین outbound با balancer leastLoad
 - **کانفیگ‌های VIP**: تک outbound بدون balancer
+- **کانفیگ‌های اطلاعات کاربر**: دقیقاً همانطور که از سرور اصلی دریافت شده
 
 ## 🔧 منطق گروه‌بندی
 
