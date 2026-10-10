@@ -3,7 +3,6 @@
 
 const http = require('http');
 const https = require('https');
-const zlib = require('zlib');
 const { URL } = require('url');
 
 const PORT = process.env.PORT || 3000;
@@ -75,104 +74,17 @@ function buildGroupKey(remarks) {
   return { key: `${country}_${tag}`, country, tag, isVIP: false };
 }
 
-// ========== Reverse Proxy ==========
-function proxyRequest(req, res) {
-  const targetUrl = new URL(req.url, `https://${TARGET_HOST}`);
+// ========== Redirect to Original Server ==========
+function redirectToOriginal(req, res) {
+  const targetUrl = `https://${TARGET_HOST}${req.url}`;
   
-  console.log(`[PROXY] ${req.method} ${targetUrl.pathname}`);
+  console.log(`[REDIRECT] Browser request → Redirecting to: ${targetUrl}`);
   
-  // Prepare headers to forward
-  const headers = { ...req.headers };
-  headers['host'] = TARGET_HOST;
-  
-  // Remove headers that shouldn't be forwarded
-  delete headers['connection'];
-  delete headers['keep-alive'];
-  delete headers['transfer-encoding'];
-  
-  // Keep Accept-Encoding for gzip support
-  if (!headers['accept-encoding']) {
-    headers['accept-encoding'] = 'gzip, deflate';
-  }
-  
-  console.log('[PROXY] Forwarding headers:', JSON.stringify(headers, null, 2));
-  
-  const options = {
-    hostname: TARGET_HOST,
-    port: 443,
-    path: targetUrl.pathname + targetUrl.search,
-    method: req.method,
-    headers: headers,
-  };
-  
-  const proxyReq = https.request(options, (proxyRes) => {
-    console.log(`[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage}`);
-    console.log('[PROXY] Response headers:', JSON.stringify(proxyRes.headers, null, 2));
-    
-    const contentType = proxyRes.headers['content-type'] || '';
-    const contentEncoding = proxyRes.headers['content-encoding'] || '';
-    const isHtml = contentType.includes('text/html');
-    
-    // Determine decompression stream
-    let stream = proxyRes;
-    if (contentEncoding.includes('gzip')) {
-      stream = proxyRes.pipe(zlib.createGunzip());
-    } else if (contentEncoding.includes('deflate')) {
-      stream = proxyRes.pipe(zlib.createInflate());
-    }
-    
-    // If HTML response, buffer and rewrite links
-    if (isHtml) {
-      const chunks = [];
-      stream.on('data', chunk => chunks.push(chunk));
-      stream.on('end', () => {
-        let html = Buffer.concat(chunks).toString('utf-8');
-        
-        console.log(`[PROXY] HTML size: ${html.length} bytes`);
-        
-        // Rewrite links from original server to our server
-        const ourHost = req.headers['host'] || `localhost:${PORT}`;
-        const ourProtocol = req.headers['x-forwarded-proto'] || 'http';
-        const ourBaseUrl = `${ourProtocol}://${ourHost}`;
-        
-        // Replace all occurrences of original server URLs with our server URL
-        html = html.replace(new RegExp(`https?://${TARGET_HOST}`, 'g'), ourBaseUrl);
-        html = html.replace(/https?:\/\/forsubs\.software4you\.ir/g, ourBaseUrl);
-        
-        // Forward response with modified HTML
-        const responseHeaders = { ...proxyRes.headers };
-        delete responseHeaders['content-encoding'];
-        delete responseHeaders['content-length'];
-        responseHeaders['content-length'] = Buffer.byteLength(html, 'utf-8');
-        
-        res.writeHead(proxyRes.statusCode, responseHeaders);
-        res.end(html);
-      });
-    } else {
-      // For non-HTML responses, stream directly
-      res.writeHead(proxyRes.statusCode, proxyRes.headers);
-      stream.pipe(res, { end: true });
-    }
-    
-    stream.on('error', (err) => {
-      console.error('[PROXY] Stream error:', err.message);
-      if (!res.headersSent) {
-        res.writeHead(502);
-      }
-      res.end('Bad Gateway');
-    });
+  res.writeHead(302, {
+    'Location': targetUrl,
+    'Cache-Control': 'no-store'
   });
-  
-  proxyReq.on('error', (err) => {
-    console.error('[PROXY] Request error:', err.message);
-    if (!res.headersSent) {
-      res.writeHead(502);
-    }
-    res.end('Bad Gateway');
-  });
-  
-  // Pipe request body if exists (for POST, PUT, etc.)
-  req.pipe(proxyReq, { end: true });
+  res.end();
 }
 
 // ========== Subscription Processing ==========
@@ -564,10 +476,9 @@ const server = http.createServer(async (req, res) => {
 
   // Subscription endpoint
   if (req.url.startsWith('/sub/')) {
-    // Browser request → Reverse Proxy (stream directly)
+    // Browser request → Redirect to original server
     if (isBrowserRequest(req)) {
-      console.log(`[BROWSER] Reverse proxy mode`);
-      proxyRequest(req, res);
+      redirectToOriginal(req, res);
       return;
     }
     
@@ -598,22 +509,22 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Default: Reverse Proxy for all other paths
-  console.log(`[DEFAULT] Reverse proxy mode for ${req.url}`);
-  proxyRequest(req, res);
+  // Default: Redirect to original server for all other paths
+  console.log(`[DEFAULT] Redirect to original server for ${req.url}`);
+  redirectToOriginal(req, res);
 });
 
 server.listen(PORT, () => {
-  console.log(`\n🚀 Config Merger Server (Reverse Proxy Mode)`);
+  console.log(`\n🚀 Config Merger Server`);
   console.log(`📡 Port: ${PORT}`);
   console.log(`🎯 Target: ${TARGET_HOST}`);
   console.log(`\n📖 Usage:`);
   console.log(`   Browser: http://localhost:${PORT}/sub/<path>`);
   console.log(`   Client:  curl -H "Accept: application/json" http://localhost:${PORT}/sub/<path>`);
   console.log(`\n✨ Features:`);
-  console.log(`   • Browser requests → Reverse Proxy (stream HTML)`);
+  console.log(`   • Browser requests → Redirect to original server`);
   console.log(`   • Client requests → Process & merge configs`);
-  console.log(`   • All headers pass-through`);
-  console.log(`   • Redirect support`);
+  console.log(`   • Country-based grouping with balancer`);
+  console.log(`   • VIP configs preserved`);
   console.log(`\n`);
 });
