@@ -99,6 +99,7 @@ http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-L
 - ✅ ترکیب پروکسی‌های هم‌گروه با balancer `leastLoad`
 - ✅ VIP ها به صورت custom config جداگانه
 - ✅ حفظ FinalMask اصلی کانفیگ (بدون تغییر)
+- ✅ حفظ کانفیگ‌های اطلاعات کاربر و مصرف بدون تغییر
 - ✅ BurstObservatory برای پینگ خودکار
 - ✅ بدون نیاز به فرانت‌اند
 - ✅ بدون نیاز به CORS proxy
@@ -163,6 +164,7 @@ PORT=8080 node server.js
 
 - سرور به صورت خودکار `forsubs.software4you.ir` را به `www.software4you.ir` تبدیل می‌کند
 - **FinalMask اصلی کانفیگ حفظ می‌شود** - سرور هیچ FinalMask جدیدی اضافه نمی‌کند
+- **کانفیگ‌های اطلاعات کاربر و مصرف** (مثل حجم، تاریخ، یوزر) بدون هیچ تغییری در خروجی قرار می‌گیرند
 - اگر فقط یک پروکسی در گروه باشد، balancer حذف می‌شود
 - کانفیگ‌های VIP هیچ تغییری نمی‌کنند (فقط outbound اصلی با همان تنظیمات)
 

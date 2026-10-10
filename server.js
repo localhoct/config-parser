@@ -179,12 +179,32 @@ function buildSingleConfig(config) {
   };
 }
 
+// Check if config is a proxy config (has outbound with proxy protocol)
+function isProxyConfig(config) {
+  if (!config.outbounds || config.outbounds.length === 0) return false;
+  const proxyOutbound = config.outbounds.find(o => 
+    o.protocol === 'vless' || 
+    o.protocol === 'trojan' || 
+    o.protocol === 'shadowsocks' ||
+    o.protocol === 'vmess'
+  );
+  return !!proxyOutbound;
+}
+
 // Process configs
 function processConfigs(configs) {
   const groups = new Map();
+  const passthroughConfigs = []; // Configs that should pass through unchanged
 
   for (const config of configs) {
     if (!config.remarks) continue;
+    
+    // Check if this is a proxy config
+    if (!isProxyConfig(config)) {
+      // Not a proxy config (e.g., user info, usage stats) - keep as is
+      passthroughConfigs.push(config);
+      continue;
+    }
     
     const { key, country, tag, isVIP } = buildGroupKey(config.remarks);
     
@@ -196,6 +216,8 @@ function processConfigs(configs) {
 
   // Build final configs
   const result = [];
+  
+  // Add merged/VIP proxy configs
   for (const group of groups.values()) {
     if (group.isVIP) {
       // VIP: single config
@@ -206,6 +228,11 @@ function processConfigs(configs) {
       // Merged: all configs in group
       result.push(buildMergedConfig(group.country, group.tag, group.configs));
     }
+  }
+  
+  // Add passthrough configs (user info, usage stats, etc.) unchanged
+  for (const config of passthroughConfigs) {
+    result.push(config);
   }
 
   return result;
