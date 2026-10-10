@@ -76,6 +76,38 @@ http://localhost:3000/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-L
 - **کانفیگ‌های VIP**: تک outbound بدون balancer
 - **کانفیگ‌های اطلاعات کاربر**: دقیقاً همانطور که از سرور اصلی دریافت شده
 
+### 🔑 هدرهای پاس داده شده:
+
+سرور هدرهای اصلی از سرور `www.software4you.ir` را به کلاینت پاس می‌دهد:
+
+| Header | توضیح |
+|--------|-------|
+| `subscription-userinfo` | اطلاعات کاربر (upload, download, total, expire) |
+| `profile-update-interval` | فاصله زمانی آپدیت (مثلاً 24 ساعت) |
+| `profile-title` | عنوان پروفایل (base64 encoded) |
+| `profile-web-page-url` | آدرس صفحه وب |
+| `support-url` | آدرس پشتیبانی |
+| `announce` | پیام اطلاع‌رسانی (base64 encoded) |
+| `announce-url` | آدرس اطلاع‌رسانی |
+| `content-disposition` | نام فایل برای دانلود |
+| `cache-control` | تنظیمات کش |
+
+### 📱 مثال هدرهای خروجی:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+subscription-userinfo: upload=0; download=5368709120; total=10737418240; expire=1735689600
+profile-update-interval: 24
+profile-title: base64:VGVzdCBVc2Vy
+profile-web-page-url: https://www.software4you.ir/sub/...
+support-url: https://t.me/support
+announce: base64:SGVsbG8gV29ybGQ=
+announce-url: https://t.me/announcements
+content-disposition: attachment; filename="merged-configs.json"
+cache-control: no-store
+```
+
 ## 🔧 منطق گروه‌بندی
 
 ### گروه‌های ترکیبی (با Balancer):
@@ -229,8 +261,35 @@ PORT=8080 node server.js
 - **کانفیگ‌های اطلاعات کاربر و مصرف** (مثل حجم، تاریخ، یوزر) بدون هیچ تغییری در خروجی قرار می‌گیرند
 - **ایموجی و نام‌ها دست نمی‌خورند** - تمام remarks اصلی حفظ می‌شوند
 - **کانفیگ‌های منقضی شده** (حجم تمام شده، تاریخ تمام شده) دقیقاً همانطور که هستند برگردانده می‌شوند
+- **هدرهای اصلی سرور پاس داده می‌شوند** - subscription-userinfo, profile-update-interval, profile-title و...
 - اگر فقط یک پروکسی در گروه باشد، balancer حذف می‌شود
 - کانفیگ‌های VIP هیچ تغییری نمی‌کنند (فقط outbound اصلی با همان تنظیمات)
+
+## 🔄 گردش کار کامل
+
+### حالت ۱: درخواست از مرورگر
+```
+1. کاربر لینک را در مرورگر باز می‌کند
+2. سرور تشخیص می‌دهد Accept: text/html
+3. سرور به www.software4you.ir درخواست می‌دهد
+4. صفحه HTML اطلاعات کاربر دریافت می‌شود
+5. صفحه HTML + هدرهای اصلی به کاربر برگردانده می‌شود
+6. کاربر اطلاعات خود را می‌بیند (حجم، تاریخ، یوزرنیم و...)
+```
+
+### حالت ۲: درخواست از کلاینت (v2rayN, FlClash, ...)
+```
+1. کلاینت لینک ساب را دریافت می‌کند
+2. سرور تشخیص می‌دهد Accept: text/plain یا application/json
+3. سرور به www.software4you.ir درخواست می‌دهد
+4. کانفیگ‌های JSON دریافت می‌شوند
+5. کانفیگ‌ها بر اساس کشور و تگ گروه‌بندی می‌شوند
+6. هر گروه با balancer leastLoad ترکیب می‌شود
+7. کانفیگ‌های VIP جداگانه نگه داشته می‌شوند
+8. کانفیگ‌های اطلاعات کاربر بدون تغییر اضافه می‌شوند
+9. کانفیگ‌های نهایی + هدرهای اصلی به کلاینت برگردانده می‌شوند
+10. کلاینت کانفیگ‌ها را import می‌کند
+```
 
 ## 🐛 عیب‌یابی
 

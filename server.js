@@ -97,7 +97,7 @@ function buildGroupKey(remarks) {
   return { key: `${country}_${tag}`, country, tag, isVIP: false };
 }
 
-// Fetch subscription from www.software4you.ir
+// Fetch subscription from www.software4you.ir (returns data + headers)
 function fetchSubscription(path) {
   return new Promise((resolve, reject) => {
     const url = `https://www.software4you.ir${path}`;
@@ -106,16 +106,34 @@ function fetchSubscription(path) {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
+        // Extract important headers from original server
+        const originalHeaders = {
+          'subscription-userinfo': res.headers['subscription-userinfo'],
+          'profile-update-interval': res.headers['profile-update-interval'],
+          'profile-title': res.headers['profile-title'],
+          'profile-web-page-url': res.headers['profile-web-page-url'],
+          'support-url': res.headers['support-url'],
+          'content-disposition': res.headers['content-disposition'],
+          'announce': res.headers['announce'],
+          'announce-url': res.headers['announce-url'],
+        };
+        
         try {
           // Try to parse as JSON
           const configs = JSON.parse(data);
-          resolve(Array.isArray(configs) ? configs : [configs]);
+          resolve({ 
+            configs: Array.isArray(configs) ? configs : [configs],
+            headers: originalHeaders
+          });
         } catch {
           // Try base64 decode
           try {
             const decoded = Buffer.from(data.replace(/\s/g, ''), 'base64').toString('utf-8');
             const configs = JSON.parse(decoded);
-            resolve(Array.isArray(configs) ? configs : [configs]);
+            resolve({ 
+              configs: Array.isArray(configs) ? configs : [configs],
+              headers: originalHeaders
+            });
           } catch {
             reject(new Error('Failed to parse subscription data'));
           }
@@ -329,7 +347,20 @@ function fetchHtmlPage(path) {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
-        resolve({ html: data, headers: res.headers });
+        // Extract important headers from original server
+        const originalHeaders = {
+          'subscription-userinfo': res.headers['subscription-userinfo'],
+          'profile-update-interval': res.headers['profile-update-interval'],
+          'profile-title': res.headers['profile-title'],
+          'profile-web-page-url': res.headers['profile-web-page-url'],
+          'support-url': res.headers['support-url'],
+          'content-disposition': res.headers['content-disposition'],
+          'announce': res.headers['announce'],
+          'announce-url': res.headers['announce-url'],
+          'cache-control': res.headers['cache-control'],
+        };
+        
+        resolve({ html: data, headers: originalHeaders });
       });
     }).on('error', reject);
   });
@@ -369,10 +400,22 @@ const server = http.createServer(async (req, res) => {
         try {
           const { html, headers } = await fetchHtmlPage(path);
           
-          res.writeHead(200, {
+          // Build response headers (pass through original headers)
+          const responseHeaders = {
             'Content-Type': 'text/html; charset=utf-8',
-            'Cache-Control': 'no-store',
-          });
+          };
+          
+          // Add original headers if they exist
+          if (headers['subscription-userinfo']) responseHeaders['subscription-userinfo'] = headers['subscription-userinfo'];
+          if (headers['profile-update-interval']) responseHeaders['profile-update-interval'] = headers['profile-update-interval'];
+          if (headers['profile-title']) responseHeaders['profile-title'] = headers['profile-title'];
+          if (headers['profile-web-page-url']) responseHeaders['profile-web-page-url'] = headers['profile-web-page-url'];
+          if (headers['support-url']) responseHeaders['support-url'] = headers['support-url'];
+          if (headers['announce']) responseHeaders['announce'] = headers['announce'];
+          if (headers['announce-url']) responseHeaders['announce-url'] = headers['announce-url'];
+          if (headers['cache-control']) responseHeaders['Cache-Control'] = headers['cache-control'];
+          
+          res.writeHead(200, responseHeaders);
           res.end(html);
         } catch (err) {
           // Fallback: show simple info page if original server is unavailable
@@ -412,18 +455,29 @@ const server = http.createServer(async (req, res) => {
       // If client request, fetch and process configs
       console.log(`Fetching subscription from: https://www.software4you.ir${path}`);
       
-      const configs = await fetchSubscription(path);
+      const { configs, headers: originalHeaders } = await fetchSubscription(path);
       console.log(`Received ${configs.length} configs`);
       
       const merged = processConfigs(configs);
       console.log(`Generated ${merged.length} merged configs`);
 
-      // Return as JSON array
-      res.writeHead(200, {
+      // Build response headers (pass through original headers)
+      const responseHeaders = {
         'Content-Type': 'application/json; charset=utf-8',
         'Content-Disposition': 'attachment; filename="merged-configs.json"',
-        'Profile-Update-Interval': '24',
-      });
+        'Cache-Control': 'no-store',
+      };
+      
+      // Add original headers if they exist
+      if (originalHeaders['subscription-userinfo']) responseHeaders['subscription-userinfo'] = originalHeaders['subscription-userinfo'];
+      if (originalHeaders['profile-update-interval']) responseHeaders['profile-update-interval'] = originalHeaders['profile-update-interval'];
+      if (originalHeaders['profile-title']) responseHeaders['profile-title'] = originalHeaders['profile-title'];
+      if (originalHeaders['profile-web-page-url']) responseHeaders['profile-web-page-url'] = originalHeaders['profile-web-page-url'];
+      if (originalHeaders['support-url']) responseHeaders['support-url'] = originalHeaders['support-url'];
+      if (originalHeaders['announce']) responseHeaders['announce'] = originalHeaders['announce'];
+      if (originalHeaders['announce-url']) responseHeaders['announce-url'] = originalHeaders['announce-url'];
+      
+      res.writeHead(200, responseHeaders);
       res.end(JSON.stringify(merged, null, 2));
     } catch (error) {
       console.error('Error:', error.message);
