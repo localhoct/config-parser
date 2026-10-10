@@ -1,66 +1,65 @@
+// تست پروکسی مرورگر: ۱) HTML صفحه  ۲) APIهای صفحه (/info /links /apps)
+// استفاده:  node test-proxy.js <TOKEN>      (یا: TOKEN=... node test-proxy.js)
 const http = require('http');
 
-const testUrl = 'http://localhost:3000/sub/djMsMTE0OTMsMTc5MTY1NTA4Nw.ITOLc0RJBcgefRvf4S-8AegrKXVWjmH4x9Eb3LsxeBY';
+const TOKEN = process.argv[2] || process.env.TOKEN;
+const BASE = process.env.BASE_URL || 'http://localhost:3000';
 
-console.log('Testing browser request (Accept: text/html)...');
-console.log('URL:', testUrl);
-console.log('---');
+if (!TOKEN) {
+  console.error('Usage: node test-proxy.js <TOKEN>');
+  process.exit(1);
+}
 
-const req = http.get(testUrl, {
-  headers: {
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.9,fa;q=0.8',
-    'Cache-Control': 'no-cache',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'none',
-    'Sec-Fetch-User': '?1',
-    'Upgrade-Insecure-Requests': '1'
-  }
-}, (res) => {
-  console.log('Status:', res.statusCode);
-  console.log('Content-Type:', res.headers['content-type']);
-  console.log('---');
-  
-  let data = '';
-  res.on('data', chunk => data += chunk);
-  res.on('end', () => {
-    console.log('Response length:', data.length, 'bytes');
-    console.log('---');
-    
-    // Check if HTML contains user info
-    if (data.includes('AzadShop_48d2f954')) {
-      console.log('✓ Username found in HTML');
-    } else {
-      console.log('✗ Username NOT found in HTML');
-    }
-    
-    if (data.includes('۵۰٫۰ گیگابایت')) {
-      console.log('✓ Data limit found in HTML');
-    } else {
-      console.log('✗ Data limit NOT found in HTML');
-    }
-    
-    if (data.includes('۳۰ روز')) {
-      console.log('✓ Expire date found in HTML');
-    } else {
-      console.log('✗ Expire date NOT found in HTML');
-    }
-    
-    // Check if links are rewritten
-    if (data.includes('localhost:3000')) {
-      console.log('✓ Links rewritten to localhost:3000');
-    } else if (data.includes('www.software4you.ir')) {
-      console.log('✗ Links still point to www.software4you.ir');
-    }
-    
-    console.log('---');
-    console.log('First 500 chars:');
-    console.log(data.substring(0, 500));
+function get(path, headers) {
+  return new Promise((resolve, reject) => {
+    http.get(BASE + path, { headers }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => resolve({ res, body: Buffer.concat(chunks) }));
+    }).on('error', reject);
   });
-});
+}
 
-req.on('error', (err) => {
-  console.error('Error:', err.message);
-});
+(async () => {
+  const sub = `/sub/${TOKEN}`;
+
+  // 1) صفحه‌ی HTML (مثل مرورگر، با br هم)
+  const page = await get(sub, {
+    Accept: 'text/html,application/xhtml+xml,*/*;q=0.8',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'User-Agent': 'Mozilla/5.0',
+  });
+  const ct = page.res.headers['content-type'] || '';
+  const enc = page.res.headers['content-encoding'] || 'none';
+  console.log(`[HTML ] ${page.res.statusCode} content-type=${ct} encoding=${enc} size=${page.body.length}`);
+  console.log(ct.includes('text/html') ? '  ✓ content-type is HTML' : '  ✗ content-type is NOT HTML');
+  if (enc === 'none') {
+    console.log(page.body.toString('utf8').includes('<html') ? '  ✓ body looks like HTML' : '  ✗ body does not look like HTML');
+  } else {
+    console.log('  (body is compressed and passed through unchanged — expected)');
+  }
+
+  // 2) /info دقیقاً مثل fetch صفحه
+  const info = await get(`${sub}/info`, { Accept: 'application/json', 'Accept-Encoding': 'identity' });
+  console.log(`[INFO ] ${info.res.statusCode} content-type=${info.res.headers['content-type']}`);
+  try {
+    const data = JSON.parse(info.body.toString('utf8'));
+    if (Array.isArray(data)) {
+      console.log('  ✗ got an ARRAY (config-processing branch) — /info must be proxied, not processed');
+    } else {
+      console.log('  ✓ got an object with keys:', Object.keys(data).join(', '));
+    }
+  } catch (e) {
+    console.log('  ✗ response is not JSON:', e.message);
+  }
+
+  // 3) /links (بدون Accept خاص، مثل fetch صفحه)
+  const links = await get(`${sub}/links`, { 'Accept-Encoding': 'identity' });
+  const text = links.body.toString('utf8');
+  console.log(`[LINKS] ${links.res.statusCode} lines=${text.split(/\r?\n/).filter(Boolean).length}`);
+  console.log(text.trim().startsWith('[') ? '  ✗ looks like a JSON array (processed) — should be raw links' : '  ✓ not processed');
+
+  // 4) /apps
+  const apps = await get(`${sub}/apps`, { Accept: 'application/json', 'Accept-Encoding': 'identity' });
+  console.log(`[APPS ] ${apps.res.statusCode} size=${apps.body.length}`);
+})().catch((e) => console.error('Error:', e.message));
