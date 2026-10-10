@@ -1,0 +1,342 @@
+// Config Merger Server
+// یک سرور ساده که ساب‌لینک را دریافت و کانفیگ‌ها را ترکیب می‌کند
+
+const http = require('http');
+const https = require('https');
+
+const PORT = process.env.PORT || 3000;
+
+// FinalMask templates
+const FINALMASK_TEMPLATES = {
+  pop3: {
+    tcp: [{
+      type: 'header-custom',
+      settings: {
+        clients: [[], [{ type: 'str', packet: 'CAPA\r\n' }], [{ type: 'str', packet: 'STLS\r\n' }]],
+        servers: [
+          [{ type: 'str', packet: '+OK Dovecot (Ubuntu) ready.\r\n' }],
+          [{ type: 'str', packet: '+OK\r\nCAPA\r\nTOP\r\nUIDL\r\nRESP-CODES\r\nPIPELINING\r\nAUTH-RESP-CODE\r\nSTLS\r\nUSER\r\nSASL PLAIN LOGIN\r\n.\r\n' }],
+          [{ type: 'str', packet: '+OK Begin TLS negotiation now.\r\n' }],
+        ],
+      },
+    }],
+  },
+  smtp: {
+    tcp: [{
+      type: 'header-custom',
+      settings: {
+        clients: [
+          [],
+          [{ type: 'str', packet: 'EHLO ' }, { type: 'str', packet: 'mailhost' }, { type: 'str', packet: '.example.org\r\n' }],
+          [{ type: 'str', packet: 'STARTTLS\r\n' }],
+        ],
+        servers: [
+          [
+            { type: 'str', packet: '220 mail.example.net ESMTP Exim 4.96 Mon, 05 Oct 2026 ' },
+            { rand: 1, randRange: '48-49' }, { rand: 1, randRange: '48-57' },
+            { type: 'str', packet: ':' },
+            { rand: 1, randRange: '48-53' }, { rand: 1, randRange: '48-57' },
+            { type: 'str', packet: ':' },
+            { rand: 1, randRange: '48-53' }, { rand: 1, randRange: '48-57' },
+            { type: 'str', packet: ' +0000\r\n' },
+          ],
+          [
+            { type: 'str', packet: '250-mail.example.net Hello ' },
+            { type: 'str', packet: 'mailhost' },
+            { type: 'str', packet: '.example.org [198.51.100.' },
+            { rand: 1, randRange: '49-57' }, { rand: 1, randRange: '48-57' },
+            { type: 'str', packet: ']\r\n250-SIZE 52428800\r\n250-8BITMIME\r\n250-PIPELINING\r\n250-PIPECONNECT\r\n250-STARTTLS\r\n250 HELP\r\n' },
+          ],
+          [{ type: 'str', packet: '220 TLS go ahead\r\n' }],
+        ],
+      },
+    }],
+  },
+  rdp: {
+    tcp: [{
+      type: 'header-custom',
+      settings: {
+        clients: [[
+          { type: 'hex', packet: '0300002c27e00000000000' },
+          { type: 'str', packet: 'Cookie: mstshash=' },
+          { rand: 6, randRange: '97-122' },
+          { type: 'str', packet: '\r\n' },
+          { type: 'hex', packet: '0100080001000000' },
+        ]],
+        servers: [[{ type: 'hex', packet: '030000130ed00000123400021f080001000000' }]],
+      },
+    }],
+  },
+};
+
+function getFinalMask(index) {
+  const templates = ['pop3', 'smtp', 'rdp', 'pop3', 'smtp'];
+  return FINALMASK_TEMPLATES[templates[index % templates.length]];
+}
+
+const FLAGS = {
+  'DE': '🇩🇪', 'NL': '🇳🇱', 'FI': '🇫🇮', 'US': '🇺🇸',
+  'CA': '🇨🇦', 'SE': '🇸🇪', 'TR': '🇹🇷', 'FR': '🇫🇷',
+  'GB': '🇬🇧', 'JP': '🇯🇵', 'KR': '🇰🇷', 'SG': '🇸🇬',
+};
+
+function getFlag(code) {
+  return FLAGS[code] || '🌐';
+}
+
+// Extract country code from remarks
+function extractCountry(remarks) {
+  // Flag emoji
+  const flagPattern = /[\u{1F1E0}-\u{1F1FF}]{2}/u;
+  const flagMatch = remarks.match(flagPattern);
+  if (flagMatch) {
+    const codePoints = [...flagMatch[0]].map(c => c.codePointAt(0) - 0x1F1E6 + 65);
+    return String.fromCharCode(...codePoints);
+  }
+  // Text code
+  const knownCodes = ['DE', 'NL', 'FI', 'US', 'CA', 'SE', 'TR', 'FR', 'GB', 'JP', 'KR', 'SG'];
+  for (const code of knownCodes) {
+    if (remarks.includes(code)) return code;
+  }
+  return 'OTHER';
+}
+
+// Extract tag from remarks
+function extractTag(remarks) {
+  const bracketMatch = remarks.match(/\[([^\]]+)\]/);
+  if (bracketMatch) return bracketMatch[1].trim();
+  if (remarks.includes('~ Hamrah-Aval')) return 'Hamrah-Aval';
+  return 'default';
+}
+
+// Check if VIP
+function isVIP(remarks) {
+  return remarks.includes('[VIP]');
+}
+
+// Build group key
+function buildGroupKey(remarks) {
+  const country = extractCountry(remarks);
+  const tag = extractTag(remarks);
+  const vip = isVIP(remarks);
+  
+  if (vip) {
+    return { key: `VIP_${remarks.replace(/[^\w]/g, '_').slice(0, 30)}`, country, tag: 'VIP', isVIP: true };
+  }
+  
+  return { key: `${country}_${tag}`, country, tag, isVIP: false };
+}
+
+// Fetch subscription from www.software4you.ir
+function fetchSubscription(path) {
+  return new Promise((resolve, reject) => {
+    const url = `https://www.software4you.ir${path}`;
+    
+    https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          // Try to parse as JSON
+          const configs = JSON.parse(data);
+          resolve(Array.isArray(configs) ? configs : [configs]);
+        } catch {
+          // Try base64 decode
+          try {
+            const decoded = Buffer.from(data.replace(/\s/g, ''), 'base64').toString('utf-8');
+            const configs = JSON.parse(decoded);
+            resolve(Array.isArray(configs) ? configs : [configs]);
+          } catch {
+            reject(new Error('Failed to parse subscription data'));
+          }
+        }
+      });
+    }).on('error', reject);
+  });
+}
+
+// Build merged config with balancer
+function buildMergedConfig(country, tag, configs) {
+  const flag = getFlag(country);
+  const outbounds = [];
+  const proxyTags = [];
+
+  configs.forEach((config, index) => {
+    // Extract outbound from original config
+    if (config.outbounds && config.outbounds.length > 0) {
+      const outbound = config.outbounds.find(o => o.tag === 'proxy' || o.protocol === 'vless' || o.protocol === 'trojan' || o.protocol === 'shadowsocks');
+      if (outbound) {
+        const tag_name = index === 0 ? 'proxy' : `proxy-${index + 1}`;
+        const newOutbound = JSON.parse(JSON.stringify(outbound));
+        newOutbound.tag = tag_name;
+        
+        // Add FinalMask if TCP
+        if (newOutbound.streamSettings && newOutbound.streamSettings.network === 'tcp') {
+          newOutbound.streamSettings.finalmask = getFinalMask(index);
+        }
+        
+        outbounds.push(newOutbound);
+        proxyTags.push(tag_name);
+      }
+    }
+  });
+
+  // Add DIRECT and BLOCK
+  outbounds.push({ tag: 'DIRECT', protocol: 'freedom', settings: {} });
+  outbounds.push({ tag: 'BLOCK', protocol: 'blackhole', settings: { response: { type: 'http' } } });
+
+  return {
+    remarks: `${flag} ${country} [${tag}]`,
+    log: { loglevel: 'warning' },
+    dns: { servers: ['1.1.1.1', '8.8.8.8'] },
+    inbounds: [
+      { tag: 'socks', port: 10808, listen: '127.0.0.1', protocol: 'socks', settings: { udp: true, auth: 'noauth' }, sniffing: { enabled: true, destOverride: ['http', 'tls'] } },
+      { tag: 'http', port: 10809, listen: '127.0.0.1', protocol: 'http' },
+    ],
+    outbounds,
+    routing: {
+      domainStrategy: 'AsIs',
+      balancers: proxyTags.length > 1 ? [{
+        tag: 'auto',
+        selector: proxyTags,
+        fallbackTag: proxyTags[0],
+        strategy: {
+          type: 'leastLoad',
+          settings: { baselines: ['200ms', '500ms', '1s'], expected: 2, maxRTT: '3s', tolerance: 0.05 },
+        },
+      }] : undefined,
+      rules: proxyTags.length > 1
+        ? [{ type: 'field', network: 'tcp,udp', balancerTag: 'auto' }]
+        : [{ type: 'field', network: 'tcp,udp', outboundTag: proxyTags[0] }],
+    },
+    policy: { levels: { '0': { timeout: { handshake: 8, connIdle: 300, uplinkOnly: 10, downlinkOnly: 30 } } } },
+    burstObservatory: {
+      subjectSelector: ['proxy'],
+      pingConfig: { destination: 'http://cp.cloudflare.com/generate_204', interval: '3m', timeout: '5s', sampling: 2 },
+    },
+  };
+}
+
+// Build single config (for VIP)
+function buildSingleConfig(config) {
+  const outbound = config.outbounds?.find(o => o.tag === 'proxy' || o.protocol === 'vless' || o.protocol === 'trojan' || o.protocol === 'shadowsocks');
+  if (!outbound) return config;
+
+  const newOutbound = JSON.parse(JSON.stringify(outbound));
+  newOutbound.tag = 'proxy';
+  
+  // Add FinalMask if TCP
+  if (newOutbound.streamSettings && newOutbound.streamSettings.network === 'tcp') {
+    newOutbound.streamSettings.finalmask = getFinalMask(0);
+  }
+
+  return {
+    remarks: config.remarks || 'VIP Config',
+    log: { loglevel: 'warning' },
+    dns: { servers: ['1.1.1.1', '8.8.8.8'] },
+    inbounds: [
+      { tag: 'socks', port: 10808, listen: '127.0.0.1', protocol: 'socks', settings: { udp: true, auth: 'noauth' }, sniffing: { enabled: true, destOverride: ['http', 'tls'] } },
+      { tag: 'http', port: 10809, listen: '127.0.0.1', protocol: 'http' },
+    ],
+    outbounds: [
+      newOutbound,
+      { tag: 'DIRECT', protocol: 'freedom', settings: {} },
+      { tag: 'BLOCK', protocol: 'blackhole', settings: { response: { type: 'http' } } },
+    ],
+    routing: {
+      domainStrategy: 'AsIs',
+      rules: [{ type: 'field', network: 'tcp,udp', outboundTag: 'proxy' }],
+    },
+    policy: { levels: { '0': { timeout: { handshake: 8, connIdle: 300, uplinkOnly: 10, downlinkOnly: 30 } } } },
+  };
+}
+
+// Process configs
+function processConfigs(configs) {
+  const groups = new Map();
+
+  for (const config of configs) {
+    if (!config.remarks) continue;
+    
+    const { key, country, tag, isVIP } = buildGroupKey(config.remarks);
+    
+    if (!groups.has(key)) {
+      groups.set(key, { key, country, tag, isVIP, configs: [] });
+    }
+    groups.get(key).configs.push(config);
+  }
+
+  // Build final configs
+  const result = [];
+  for (const group of groups.values()) {
+    if (group.isVIP) {
+      // VIP: single config
+      for (const config of group.configs) {
+        result.push(buildSingleConfig(config));
+      }
+    } else {
+      // Merged: all configs in group
+      result.push(buildMergedConfig(group.country, group.tag, group.configs));
+    }
+  }
+
+  return result;
+}
+
+// HTTP Server
+const server = http.createServer(async (req, res) => {
+  // CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200);
+    res.end();
+    return;
+  }
+
+  // Health check
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', timestamp: new Date().toISOString() }));
+    return;
+  }
+
+  // Subscription endpoint
+  if (req.url.startsWith('/sub/')) {
+    try {
+      const path = req.url;
+      console.log(`Fetching subscription from: https://www.software4you.ir${path}`);
+      
+      const configs = await fetchSubscription(path);
+      console.log(`Received ${configs.length} configs`);
+      
+      const merged = processConfigs(configs);
+      console.log(`Generated ${merged.length} merged configs`);
+
+      // Return as JSON array
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Disposition': 'attachment; filename="merged-configs.json"',
+        'Profile-Update-Interval': '24',
+      });
+      res.end(JSON.stringify(merged, null, 2));
+    } catch (error) {
+      console.error('Error:', error.message);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: error.message }));
+    }
+    return;
+  }
+
+  // 404
+  res.writeHead(404, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: 'Not found' }));
+});
+
+server.listen(PORT, () => {
+  console.log(`Config Merger Server running on port ${PORT}`);
+  console.log(`Usage: http://localhost:${PORT}/sub/<your-subscription-path>`);
+  console.log(`Example: http://localhost:${PORT}/sub/djMsMTE0NzUsMTc5MTYyOTk5Ng.gRa-kQmo6Ht9ZB8OPuuldV8tL-LAcrFCtzi4J5o-9V4`);
+});
