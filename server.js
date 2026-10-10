@@ -1,10 +1,12 @@
-// Config Merger Server
-// سرور ترکیب کانفیگ‌ها بر اساس کشور و تگ با balancer leastLoad
+// Config Merger Server - Reverse Proxy Mode
+// سرور ترکیب کانفیگ‌ها با قابلیت Reverse Proxy کامل
 
 const http = require('http');
 const https = require('https');
+const { URL } = require('url');
 
 const PORT = process.env.PORT || 3000;
+const TARGET_HOST = 'www.software4you.ir';
 
 // ========== Country Flags ==========
 const FLAGS = {
@@ -72,92 +74,112 @@ function buildGroupKey(remarks) {
   return { key: `${country}_${tag}`, country, tag, isVIP: false };
 }
 
-// ========== HTTP Requests ==========
-function fetchHtmlPage(path, reqHeaders = {}) {
-  return new Promise((resolve, reject) => {
-    const url = `https://www.software4you.ir${path}`;
+// ========== Reverse Proxy ==========
+function proxyRequest(req, res) {
+  const targetUrl = new URL(req.url, `https://${TARGET_HOST}`);
+  
+  console.log(`[PROXY] ${req.method} ${targetUrl.pathname}`);
+  
+  // Prepare headers to forward
+  const headers = { ...req.headers };
+  headers['host'] = TARGET_HOST;
+  
+  // Remove headers that shouldn't be forwarded
+  delete headers['connection'];
+  delete headers['keep-alive'];
+  delete headers['transfer-encoding'];
+  
+  const options = {
+    hostname: TARGET_HOST,
+    port: 443,
+    path: targetUrl.pathname + targetUrl.search,
+    method: req.method,
+    headers: headers,
+  };
+  
+  const proxyReq = https.request(options, (proxyRes) => {
+    console.log(`[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage}`);
     
-    // Pass through browser headers
-    const headers = {
-      'User-Agent': reqHeaders['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': reqHeaders['accept'] || 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-      'Accept-Language': reqHeaders['accept-language'] || 'en-US,en;q=0.9,fa;q=0.8',
-      'Accept-Encoding': 'gzip, deflate, br',
-      'Connection': 'keep-alive',
-      'Upgrade-Insecure-Requests': '1',
-      'Sec-Fetch-Dest': reqHeaders['sec-fetch-dest'] || 'document',
-      'Sec-Fetch-Mode': reqHeaders['sec-fetch-mode'] || 'navigate',
-      'Sec-Fetch-Site': reqHeaders['sec-fetch-site'] || 'none',
-      'Sec-Fetch-User': reqHeaders['sec-fetch-user'] || '?1',
-    };
+    // Forward status code
+    res.writeHead(proxyRes.statusCode, proxyRes.headers);
     
-    // Add Referer if exists
-    if (reqHeaders['referer']) headers['Referer'] = reqHeaders['referer'];
+    // Stream the response directly
+    proxyRes.pipe(res, { end: true });
     
-    const options = {
-      method: 'GET',
-      headers: headers,
-      followRedirects: true,
-    };
-    
-    https.get(url, options, (res) => {
-      // Handle redirects
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        // Follow redirect
-        const redirectUrl = new URL(res.headers.location, url);
-        https.get(redirectUrl.toString(), options, (redirectRes) => {
-          let data = '';
-          redirectRes.on('data', chunk => data += chunk);
-          redirectRes.on('end', () => {
-            resolve({ 
-              html: data, 
-              statusCode: redirectRes.statusCode,
-              headers: redirectRes.headers
-            });
-          });
-        }).on('error', reject);
-        return;
+    proxyRes.on('error', (err) => {
+      console.error('[PROXY] Response error:', err.message);
+      if (!res.headersSent) {
+        res.writeHead(502);
       }
-      
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        resolve({ 
-          html: data, 
-          statusCode: res.statusCode,
-          headers: res.headers
-        });
-      });
-    }).on('error', reject);
+      res.end('Bad Gateway');
+    });
   });
+  
+  proxyReq.on('error', (err) => {
+    console.error('[PROXY] Request error:', err.message);
+    if (!res.headersSent) {
+      res.writeHead(502);
+    }
+    res.end('Bad Gateway');
+  });
+  
+  // Pipe request body if exists (for POST, PUT, etc.)
+  req.pipe(proxyReq, { end: true });
 }
 
-function fetchSubscription(path) {
+// ========== Subscription Processing ==========
+function fetchSubscriptionData(path) {
   return new Promise((resolve, reject) => {
-    const url = `https://www.software4you.ir${path}`;
-    https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+    const options = {
+      hostname: TARGET_HOST,
+      port: 443,
+      path: path,
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+      },
+    };
+    
+    const req = https.request(options, (res) => {
       // Handle redirects
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        const redirectUrl = new URL(res.headers.location, url);
-        https.get(redirectUrl.toString(), { headers: { 'User-Agent': 'Mozilla/5.0' } }, (redirectRes) => {
+        const redirectUrl = new URL(res.headers.location, `https://${TARGET_HOST}`);
+        console.log(`[FETCH] Redirect to: ${redirectUrl.pathname}`);
+        
+        const redirectOptions = {
+          hostname: redirectUrl.hostname,
+          port: 443,
+          path: redirectUrl.pathname + redirectUrl.search,
+          method: 'GET',
+          headers: {
+            'User-Agent': 'Mozilla/5.0',
+          },
+        };
+        
+        https.request(redirectOptions, (redirectRes) => {
           processSubscriptionResponse(redirectRes, resolve, reject);
-        }).on('error', reject);
+        }).on('error', reject).end();
+        
         return;
       }
       
       processSubscriptionResponse(res, resolve, reject);
-    }).on('error', reject);
+    });
+    
+    req.on('error', reject);
+    req.end();
   });
 }
 
 function processSubscriptionResponse(res, resolve, reject) {
-  let data = '';
-  res.on('data', chunk => data += chunk);
+  const chunks = [];
+  
+  res.on('data', chunk => chunks.push(chunk));
   res.on('end', () => {
-    // Extract ALL important headers from original server
-    const originalHeaders = {};
+    const data = Buffer.concat(chunks).toString('utf-8');
     
-    // Copy all relevant headers
+    // Extract headers
+    const headers = {};
     const headerKeys = [
       'subscription-userinfo',
       'profile-update-interval',
@@ -168,19 +190,16 @@ function processSubscriptionResponse(res, resolve, reject) {
       'announce',
       'announce-url',
       'cache-control',
-      'content-type',
     ];
     
     headerKeys.forEach(key => {
-      if (res.headers[key]) {
-        originalHeaders[key] = res.headers[key];
-      }
+      if (res.headers[key]) headers[key] = res.headers[key];
     });
     
     // Try JSON
     try {
       const configs = JSON.parse(data);
-      resolve({ configs: Array.isArray(configs) ? configs : [configs], headers: originalHeaders });
+      resolve({ configs: Array.isArray(configs) ? configs : [configs], headers });
       return;
     } catch {}
     
@@ -189,13 +208,13 @@ function processSubscriptionResponse(res, resolve, reject) {
       const decoded = Buffer.from(data.replace(/\s/g, ''), 'base64').toString('utf-8');
       try {
         const configs = JSON.parse(decoded);
-        resolve({ configs: Array.isArray(configs) ? configs : [configs], headers: originalHeaders });
+        resolve({ configs: Array.isArray(configs) ? configs : [configs], headers });
         return;
       } catch {}
       
       if (decoded.includes('://')) {
         const lines = decoded.split('\n').filter(line => line.trim().length > 0);
-        resolve({ configs: parseProxyLinks(lines), headers: originalHeaders });
+        resolve({ configs: parseProxyLinks(lines), headers });
         return;
       }
     } catch {}
@@ -203,12 +222,14 @@ function processSubscriptionResponse(res, resolve, reject) {
     // Try plain text
     if (data.includes('://')) {
       const lines = data.split('\n').filter(line => line.trim().length > 0);
-      resolve({ configs: parseProxyLinks(lines), headers: originalHeaders });
+      resolve({ configs: parseProxyLinks(lines), headers });
       return;
     }
     
-    reject(new Error('Failed to parse subscription data - unknown format'));
+    reject(new Error('Failed to parse subscription data'));
   });
+  
+  res.on('error', reject);
 }
 
 // ========== Proxy Link Parsers ==========
@@ -222,7 +243,7 @@ function parseProxyLinks(lines) {
       else if (trimmed.startsWith('trojan://')) configs.push(parseTrojanLink(trimmed));
       else if (trimmed.startsWith('ss://')) configs.push(parseSSLink(trimmed));
     } catch (err) {
-      console.error('Failed to parse link:', trimmed.substring(0, 50), err.message);
+      console.error('[PARSE] Failed:', trimmed.substring(0, 50), err.message);
     }
   }
   return configs;
@@ -475,6 +496,7 @@ function isBrowserRequest(req) {
 }
 
 const server = http.createServer(async (req, res) => {
+  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -485,86 +507,65 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Health check
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok', timestamp: new Date().toISOString() }));
     return;
   }
 
+  // Subscription endpoint
   if (req.url.startsWith('/sub/')) {
+    // Browser request → Reverse Proxy (stream directly)
+    if (isBrowserRequest(req)) {
+      console.log(`[BROWSER] Reverse proxy mode`);
+      proxyRequest(req, res);
+      return;
+    }
+    
+    // Client request → Process configs
+    console.log(`[CLIENT] Processing mode`);
+    
     try {
-      const path = req.url;
-      const isBrowser = isBrowserRequest(req);
-      console.log(`Request from: ${isBrowser ? 'Browser' : 'Client'} - ${path}`);
-      
-      if (isBrowser) {
-        console.log(`Fetching HTML page from: https://www.software4you.ir${path}`);
-        try {
-          // Pass browser headers to original server
-          const { html, statusCode, headers } = await fetchHtmlPage(path, req.headers);
-          
-          // Build response headers - pass through ALL headers from original server
-          const responseHeaders = {};
-          
-          // Copy all headers from original response
-          Object.entries(headers).forEach(([key, value]) => {
-            if (value !== undefined && value !== null) {
-              // Skip hop-by-hop headers
-              const skipHeaders = ['transfer-encoding', 'connection', 'keep-alive', 'te', 'trailer', 'upgrade'];
-              if (!skipHeaders.includes(key.toLowerCase())) {
-                responseHeaders[key] = value;
-              }
-            }
-          });
-          
-          // Ensure Content-Type is set
-          if (!responseHeaders['content-type']) {
-            responseHeaders['Content-Type'] = 'text/html; charset=utf-8';
-          }
-          
-          console.log(`Returning HTML page with status ${statusCode}`);
-          res.writeHead(statusCode || 200, responseHeaders);
-          res.end(html);
-        } catch (err) {
-          console.error('Failed to fetch HTML page:', err.message);
-          res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8' });
-          res.end(`<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="UTF-8"><title>Error</title></head><body><h1>⚠️ سرور اصلی در دسترس نیست</h1></body></html>`);
-        }
-        return;
-      }
-      
-      console.log(`Fetching subscription from: https://www.software4you.ir${path}`);
-      const { configs, headers: originalHeaders } = await fetchSubscription(path);
-      console.log(`Received ${configs.length} configs`);
+      const { configs, headers } = await fetchSubscriptionData(req.url);
+      console.log(`[CLIENT] Received ${configs.length} configs`);
       
       const merged = processConfigs(configs);
-      console.log(`Generated ${merged.length} merged configs`);
+      console.log(`[CLIENT] Generated ${merged.length} merged configs`);
 
       const responseHeaders = {
         'Content-Type': 'application/json; charset=utf-8',
         'Content-Disposition': 'attachment; filename="merged-configs.json"',
         'Cache-Control': 'no-store',
+        ...headers,
       };
-      
-      Object.entries(originalHeaders).forEach(([key, value]) => {
-        if (value) responseHeaders[key] = value;
-      });
       
       res.writeHead(200, responseHeaders);
       res.end(JSON.stringify(merged, null, 2));
     } catch (error) {
-      console.error('Error:', error.message);
+      console.error('[CLIENT] Error:', error.message);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: error.message }));
     }
     return;
   }
 
-  res.writeHead(404, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ error: 'Not found' }));
+  // Default: Reverse Proxy for all other paths
+  console.log(`[DEFAULT] Reverse proxy mode for ${req.url}`);
+  proxyRequest(req, res);
 });
 
 server.listen(PORT, () => {
-  console.log(`Config Merger Server running on port ${PORT}`);
-  console.log(`Usage: http://localhost:${PORT}/sub/<your-subscription-path>`);
+  console.log(`\n🚀 Config Merger Server (Reverse Proxy Mode)`);
+  console.log(`📡 Port: ${PORT}`);
+  console.log(`🎯 Target: ${TARGET_HOST}`);
+  console.log(`\n📖 Usage:`);
+  console.log(`   Browser: http://localhost:${PORT}/sub/<path>`);
+  console.log(`   Client:  curl -H "Accept: application/json" http://localhost:${PORT}/sub/<path>`);
+  console.log(`\n✨ Features:`);
+  console.log(`   • Browser requests → Reverse Proxy (stream HTML)`);
+  console.log(`   • Client requests → Process & merge configs`);
+  console.log(`   • All headers pass-through`);
+  console.log(`   • Redirect support`);
+  console.log(`\n`);
 });
