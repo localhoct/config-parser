@@ -16,20 +16,43 @@ function getFlag(code) {
   return FLAGS[code] || '🌐';
 }
 
-// Extract country code from remarks
+// Extract country code from remarks (including numbers like DE2, DE3, NL5, etc.)
 function extractCountry(remarks) {
-  // Flag emoji
+  // First, try to extract base country code from flag emoji
   const flagPattern = /[\u{1F1E0}-\u{1F1FF}]{2}/u;
   const flagMatch = remarks.match(flagPattern);
+  let baseCode = null;
+  
   if (flagMatch) {
     const codePoints = [...flagMatch[0]].map(c => c.codePointAt(0) - 0x1F1E6 + 65);
-    return String.fromCharCode(...codePoints);
+    baseCode = String.fromCharCode(...codePoints);
   }
-  // Text code
-  const knownCodes = ['DE', 'NL', 'FI', 'US', 'CA', 'SE', 'TR', 'FR', 'GB', 'JP', 'KR', 'SG'];
-  for (const code of knownCodes) {
-    if (remarks.includes(code)) return code;
+  
+  // Now search for country code pattern: 2 letters + optional number
+  // This works for all countries, not just a predefined list
+  const countryCodePattern = /\b([A-Z]{2})(\d*)\b/;
+  const match = remarks.match(countryCodePattern);
+  
+  if (match) {
+    const code = match[1];
+    const number = match[2];
+    
+    // If we have a base code from flag, verify it matches
+    if (baseCode && code === baseCode) {
+      return number ? `${code}${number}` : code;
+    }
+    
+    // If no flag or codes don't match, use the text pattern
+    if (!baseCode) {
+      return number ? `${code}${number}` : code;
+    }
   }
+  
+  // Fallback to flag emoji base code
+  if (baseCode) {
+    return baseCode;
+  }
+  
   return 'OTHER';
 }
 
@@ -147,10 +170,14 @@ function buildMergedConfig(country, tag, configs) {
   };
 }
 
-// Build single config (for VIP)
+// Build single config (for VIP or user info)
 function buildSingleConfig(config) {
+  // If no proxy outbound, return as is (user info, expired, etc.)
   const outbound = config.outbounds?.find(o => o.tag === 'proxy' || o.protocol === 'vless' || o.protocol === 'trojan' || o.protocol === 'shadowsocks');
-  if (!outbound) return config;
+  if (!outbound) {
+    // Return config exactly as is (user info, usage stats, expired configs)
+    return config;
+  }
 
   // Deep copy - keep original config exactly as is (including finalmask if exists)
   const newOutbound = JSON.parse(JSON.stringify(outbound));
@@ -182,13 +209,30 @@ function buildSingleConfig(config) {
 // Check if config is a proxy config (has outbound with proxy protocol)
 function isProxyConfig(config) {
   if (!config.outbounds || config.outbounds.length === 0) return false;
+  
+  // Check if has proxy protocol outbound
   const proxyOutbound = config.outbounds.find(o => 
     o.protocol === 'vless' || 
     o.protocol === 'trojan' || 
     o.protocol === 'shadowsocks' ||
     o.protocol === 'vmess'
   );
+  
   return !!proxyOutbound;
+}
+
+// Check if config is a user info config (usage, expiry, etc.)
+function isUserInfoConfig(config) {
+  // If no proxy outbound, it's likely user info
+  if (!isProxyConfig(config)) return true;
+  
+  // Check remarks for user info patterns
+  const remarks = config.remarks || '';
+  if (remarks.includes('⏳') || remarks.includes('📅') || remarks.includes('✅')) {
+    return true;
+  }
+  
+  return false;
 }
 
 // Process configs
@@ -199,13 +243,21 @@ function processConfigs(configs) {
   for (const config of configs) {
     if (!config.remarks) continue;
     
-    // Check if this is a proxy config
-    if (!isProxyConfig(config)) {
-      // Not a proxy config (e.g., user info, usage stats) - keep as is
+    // Check if this is a user info config (usage, expiry, etc.)
+    if (isUserInfoConfig(config)) {
+      // User info config - keep as is (volume, expiry, username, etc.)
       passthroughConfigs.push(config);
       continue;
     }
     
+    // Check if this is a proxy config
+    if (!isProxyConfig(config)) {
+      // Not a proxy config - keep as is
+      passthroughConfigs.push(config);
+      continue;
+    }
+    
+    // This is a proxy config - group by country and tag
     const { key, country, tag, isVIP } = buildGroupKey(config.remarks);
     
     if (!groups.has(key)) {
@@ -230,7 +282,7 @@ function processConfigs(configs) {
     }
   }
   
-  // Add passthrough configs (user info, usage stats, etc.) unchanged
+  // Add passthrough configs (user info, usage stats, expired configs, etc.) unchanged
   for (const config of passthroughConfigs) {
     result.push(config);
   }
