@@ -6,74 +6,6 @@ const https = require('https');
 
 const PORT = process.env.PORT || 3000;
 
-// FinalMask templates
-const FINALMASK_TEMPLATES = {
-  pop3: {
-    tcp: [{
-      type: 'header-custom',
-      settings: {
-        clients: [[], [{ type: 'str', packet: 'CAPA\r\n' }], [{ type: 'str', packet: 'STLS\r\n' }]],
-        servers: [
-          [{ type: 'str', packet: '+OK Dovecot (Ubuntu) ready.\r\n' }],
-          [{ type: 'str', packet: '+OK\r\nCAPA\r\nTOP\r\nUIDL\r\nRESP-CODES\r\nPIPELINING\r\nAUTH-RESP-CODE\r\nSTLS\r\nUSER\r\nSASL PLAIN LOGIN\r\n.\r\n' }],
-          [{ type: 'str', packet: '+OK Begin TLS negotiation now.\r\n' }],
-        ],
-      },
-    }],
-  },
-  smtp: {
-    tcp: [{
-      type: 'header-custom',
-      settings: {
-        clients: [
-          [],
-          [{ type: 'str', packet: 'EHLO ' }, { type: 'str', packet: 'mailhost' }, { type: 'str', packet: '.example.org\r\n' }],
-          [{ type: 'str', packet: 'STARTTLS\r\n' }],
-        ],
-        servers: [
-          [
-            { type: 'str', packet: '220 mail.example.net ESMTP Exim 4.96 Mon, 05 Oct 2026 ' },
-            { rand: 1, randRange: '48-49' }, { rand: 1, randRange: '48-57' },
-            { type: 'str', packet: ':' },
-            { rand: 1, randRange: '48-53' }, { rand: 1, randRange: '48-57' },
-            { type: 'str', packet: ':' },
-            { rand: 1, randRange: '48-53' }, { rand: 1, randRange: '48-57' },
-            { type: 'str', packet: ' +0000\r\n' },
-          ],
-          [
-            { type: 'str', packet: '250-mail.example.net Hello ' },
-            { type: 'str', packet: 'mailhost' },
-            { type: 'str', packet: '.example.org [198.51.100.' },
-            { rand: 1, randRange: '49-57' }, { rand: 1, randRange: '48-57' },
-            { type: 'str', packet: ']\r\n250-SIZE 52428800\r\n250-8BITMIME\r\n250-PIPELINING\r\n250-PIPECONNECT\r\n250-STARTTLS\r\n250 HELP\r\n' },
-          ],
-          [{ type: 'str', packet: '220 TLS go ahead\r\n' }],
-        ],
-      },
-    }],
-  },
-  rdp: {
-    tcp: [{
-      type: 'header-custom',
-      settings: {
-        clients: [[
-          { type: 'hex', packet: '0300002c27e00000000000' },
-          { type: 'str', packet: 'Cookie: mstshash=' },
-          { rand: 6, randRange: '97-122' },
-          { type: 'str', packet: '\r\n' },
-          { type: 'hex', packet: '0100080001000000' },
-        ]],
-        servers: [[{ type: 'hex', packet: '030000130ed00000123400021f080001000000' }]],
-      },
-    }],
-  },
-};
-
-function getFinalMask(index) {
-  const templates = ['pop3', 'smtp', 'rdp', 'pop3', 'smtp'];
-  return FINALMASK_TEMPLATES[templates[index % templates.length]];
-}
-
 const FLAGS = {
   'DE': '🇩🇪', 'NL': '🇳🇱', 'FI': '🇫🇮', 'US': '🇺🇸',
   'CA': '🇨🇦', 'SE': '🇸🇪', 'TR': '🇹🇷', 'FR': '🇫🇷',
@@ -167,13 +99,11 @@ function buildMergedConfig(country, tag, configs) {
       const outbound = config.outbounds.find(o => o.tag === 'proxy' || o.protocol === 'vless' || o.protocol === 'trojan' || o.protocol === 'shadowsocks');
       if (outbound) {
         const tag_name = index === 0 ? 'proxy' : `proxy-${index + 1}`;
+        // Deep copy - keep original config exactly as is (including finalmask if exists)
         const newOutbound = JSON.parse(JSON.stringify(outbound));
         newOutbound.tag = tag_name;
         
-        // Add FinalMask if TCP
-        if (newOutbound.streamSettings && newOutbound.streamSettings.network === 'tcp') {
-          newOutbound.streamSettings.finalmask = getFinalMask(index);
-        }
+        // DO NOT modify finalmask - keep whatever the original config had
         
         outbounds.push(newOutbound);
         proxyTags.push(tag_name);
@@ -222,13 +152,11 @@ function buildSingleConfig(config) {
   const outbound = config.outbounds?.find(o => o.tag === 'proxy' || o.protocol === 'vless' || o.protocol === 'trojan' || o.protocol === 'shadowsocks');
   if (!outbound) return config;
 
+  // Deep copy - keep original config exactly as is (including finalmask if exists)
   const newOutbound = JSON.parse(JSON.stringify(outbound));
   newOutbound.tag = 'proxy';
   
-  // Add FinalMask if TCP
-  if (newOutbound.streamSettings && newOutbound.streamSettings.network === 'tcp') {
-    newOutbound.streamSettings.finalmask = getFinalMask(0);
-  }
+  // DO NOT modify finalmask - keep whatever the original config had
 
   return {
     remarks: config.remarks || 'VIP Config',
@@ -251,12 +179,32 @@ function buildSingleConfig(config) {
   };
 }
 
+// Check if config is a proxy config (has outbound with proxy protocol)
+function isProxyConfig(config) {
+  if (!config.outbounds || config.outbounds.length === 0) return false;
+  const proxyOutbound = config.outbounds.find(o => 
+    o.protocol === 'vless' || 
+    o.protocol === 'trojan' || 
+    o.protocol === 'shadowsocks' ||
+    o.protocol === 'vmess'
+  );
+  return !!proxyOutbound;
+}
+
 // Process configs
 function processConfigs(configs) {
   const groups = new Map();
+  const passthroughConfigs = []; // Configs that should pass through unchanged
 
   for (const config of configs) {
     if (!config.remarks) continue;
+    
+    // Check if this is a proxy config
+    if (!isProxyConfig(config)) {
+      // Not a proxy config (e.g., user info, usage stats) - keep as is
+      passthroughConfigs.push(config);
+      continue;
+    }
     
     const { key, country, tag, isVIP } = buildGroupKey(config.remarks);
     
@@ -268,6 +216,8 @@ function processConfigs(configs) {
 
   // Build final configs
   const result = [];
+  
+  // Add merged/VIP proxy configs
   for (const group of groups.values()) {
     if (group.isVIP) {
       // VIP: single config
@@ -278,6 +228,11 @@ function processConfigs(configs) {
       // Merged: all configs in group
       result.push(buildMergedConfig(group.country, group.tag, group.configs));
     }
+  }
+  
+  // Add passthrough configs (user info, usage stats, etc.) unchanged
+  for (const config of passthroughConfigs) {
+    result.push(config);
   }
 
   return result;
