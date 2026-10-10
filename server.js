@@ -3,6 +3,7 @@
 
 const http = require('http');
 const https = require('https');
+const zlib = require('zlib');
 const { URL } = require('url');
 
 const PORT = process.env.PORT || 3000;
@@ -74,17 +75,75 @@ function buildGroupKey(remarks) {
   return { key: `${country}_${tag}`, country, tag, isVIP: false };
 }
 
-// ========== Redirect to Original Server ==========
-function redirectToOriginal(req, res) {
-  const targetUrl = `https://${TARGET_HOST}${req.url}`;
+// ========== Reverse Proxy (Full) ==========
+function proxyRequest(req, res) {
+  const targetUrl = new URL(req.url, `https://${TARGET_HOST}`);
   
-  console.log(`[REDIRECT] Browser request → Redirecting to: ${targetUrl}`);
+  console.log(`[PROXY] ${req.method} ${targetUrl.pathname}`);
   
-  res.writeHead(302, {
-    'Location': targetUrl,
-    'Cache-Control': 'no-store'
+  // Prepare headers to forward
+  const headers = { ...req.headers };
+  headers['host'] = TARGET_HOST;
+  
+  // Remove headers that shouldn't be forwarded
+  delete headers['connection'];
+  delete headers['keep-alive'];
+  delete headers['transfer-encoding'];
+  
+  // Keep Accept-Encoding for gzip support
+  if (!headers['accept-encoding']) {
+    headers['accept-encoding'] = 'gzip, deflate';
+  }
+  
+  const options = {
+    hostname: TARGET_HOST,
+    port: 443,
+    path: targetUrl.pathname + targetUrl.search,
+    method: req.method,
+    headers: headers,
+  };
+  
+  const proxyReq = https.request(options, (proxyRes) => {
+    console.log(`[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage}`);
+    
+    const contentType = proxyRes.headers['content-type'] || '';
+    const contentEncoding = proxyRes.headers['content-encoding'] || '';
+    
+    // Determine decompression stream
+    let stream = proxyRes;
+    if (contentEncoding.includes('gzip')) {
+      stream = proxyRes.pipe(zlib.createGunzip());
+    } else if (contentEncoding.includes('deflate')) {
+      stream = proxyRes.pipe(zlib.createInflate());
+    }
+    
+    // Forward response headers
+    const responseHeaders = { ...proxyRes.headers };
+    delete responseHeaders['content-encoding'];
+    delete responseHeaders['content-length'];
+    
+    res.writeHead(proxyRes.statusCode, responseHeaders);
+    stream.pipe(res, { end: true });
+    
+    stream.on('error', (err) => {
+      console.error('[PROXY] Stream error:', err.message);
+      if (!res.headersSent) {
+        res.writeHead(502);
+      }
+      res.end('Bad Gateway');
+    });
   });
-  res.end();
+  
+  proxyReq.on('error', (err) => {
+    console.error('[PROXY] Request error:', err.message);
+    if (!res.headersSent) {
+      res.writeHead(502);
+    }
+    res.end('Bad Gateway');
+  });
+  
+  // Pipe request body if exists (for POST, PUT, etc.)
+  req.pipe(proxyReq, { end: true });
 }
 
 // ========== Subscription Processing ==========
@@ -476,13 +535,17 @@ const server = http.createServer(async (req, res) => {
 
   // Subscription endpoint
   if (req.url.startsWith('/sub/')) {
-    // Browser request → Redirect to original server
-    if (isBrowserRequest(req)) {
-      redirectToOriginal(req, res);
+    // Check if client wants merged configs (via custom header)
+    const wantMerged = req.headers['x-merged-configs'] === 'true';
+    
+    // Browser request OR client without merged header → Proxy to original server
+    if (isBrowserRequest(req) || !wantMerged) {
+      console.log(`[BROWSER] Proxy mode`);
+      proxyRequest(req, res);
       return;
     }
     
-    // Client request → Process configs
+    // Client request with merged header → Process configs
     console.log(`[CLIENT] Processing mode`);
     
     try {
@@ -508,11 +571,10 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
-
-  // Default: Redirect to original server for all other paths
-  console.log(`[DEFAULT] Redirect to original server for ${req.url}`);
-  redirectToOriginal(req, res);
-});
+  
+  // Default: Proxy to original server for all other paths
+  console.log(`[DEFAULT] Proxy mode for ${req.url}`);
+  proxyRequest(req, res);});
 
 server.listen(PORT, () => {
   console.log(`\n🚀 Config Merger Server`);
