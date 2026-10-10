@@ -3,7 +3,6 @@
 
 const http = require('http');
 const https = require('https');
-const zlib = require('zlib');
 const { URL } = require('url');
 
 const PORT = process.env.PORT || 3000;
@@ -76,25 +75,21 @@ function buildGroupKey(remarks) {
 }
 
 // ========== Reverse Proxy (Full) ==========
+// پاسخ بدون decompress و بدون تغییر هدرها (content-encoding / content-length) به کلاینت پاس داده می‌شود.
+// به این ترتیب gzip / deflate / br / zstd همگی درست کار می‌کنند.
 function proxyRequest(req, res) {
   const targetUrl = new URL(req.url, `https://${TARGET_HOST}`);
-  
+
   console.log(`[PROXY] ${req.method} ${targetUrl.pathname}`);
-  
-  // Prepare headers to forward
+
   const headers = { ...req.headers };
   headers['host'] = TARGET_HOST;
-  
-  // Remove headers that shouldn't be forwarded
+
+  // هدرهایی که نباید فوروارد شوند
   delete headers['connection'];
   delete headers['keep-alive'];
   delete headers['transfer-encoding'];
-  
-  // Keep Accept-Encoding for gzip support
-  if (!headers['accept-encoding']) {
-    headers['accept-encoding'] = 'gzip, deflate';
-  }
-  
+
   const options = {
     hostname: TARGET_HOST,
     port: 443,
@@ -102,47 +97,28 @@ function proxyRequest(req, res) {
     method: req.method,
     headers: headers,
   };
-  
+
   const proxyReq = https.request(options, (proxyRes) => {
-    console.log(`[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage}`);
-    
-    const contentType = proxyRes.headers['content-type'] || '';
-    const contentEncoding = proxyRes.headers['content-encoding'] || '';
-    
-    // Determine decompression stream
-    let stream = proxyRes;
-    if (contentEncoding.includes('gzip')) {
-      stream = proxyRes.pipe(zlib.createGunzip());
-    } else if (contentEncoding.includes('deflate')) {
-      stream = proxyRes.pipe(zlib.createInflate());
-    }
-    
-    // Forward response headers
-    const responseHeaders = { ...proxyRes.headers };
-    delete responseHeaders['content-encoding'];
-    delete responseHeaders['content-length'];
-    
-    res.writeHead(proxyRes.statusCode, responseHeaders);
-    stream.pipe(res, { end: true });
-    
-    stream.on('error', (err) => {
+    console.log(`[PROXY] Response: ${proxyRes.statusCode} ${proxyRes.statusMessage} (${proxyRes.headers['content-type'] || '-'})`);
+
+    res.writeHead(proxyRes.statusCode, proxyRes.headers);
+    proxyRes.pipe(res, { end: true });
+
+    proxyRes.on('error', (err) => {
       console.error('[PROXY] Stream error:', err.message);
-      if (!res.headersSent) {
-        res.writeHead(502);
-      }
-      res.end('Bad Gateway');
+      res.destroy();
     });
   });
-  
+
   proxyReq.on('error', (err) => {
     console.error('[PROXY] Request error:', err.message);
     if (!res.headersSent) {
-      res.writeHead(502);
+      res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
     }
     res.end('Bad Gateway');
   });
-  
-  // Pipe request body if exists (for POST, PUT, etc.)
+
+  // بدنه‌ی درخواست (برای POST, PUT, ...)
   req.pipe(proxyReq, { end: true });
 }
 
@@ -514,6 +490,14 @@ function isBrowserRequest(req) {
   return (req.headers['accept'] || '').includes('text/html');
 }
 
+// فقط خودِ لینک ساب (/sub/<token>) پردازش می‌شود؛
+// مسیرهای فرعی مثل /info /links /apps /usage همیشه پروکسی می‌شوند.
+const SUB_ROOT = /^\/sub\/[^/?#]+\/?(?:\?.*)?$/;
+
+function isConfigRequest(req) {
+  return SUB_ROOT.test(req.url) && !isBrowserRequest(req);
+}
+
 const server = http.createServer(async (req, res) => {
   // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -533,22 +517,14 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Subscription endpoint
-  if (req.url.startsWith('/sub/')) {
-    // Browser request → Proxy to original server
-    if (isBrowserRequest(req)) {
-      console.log(`[BROWSER] Proxy mode`);
-      proxyRequest(req, res);
-      return;
-    }
-    
-    // Client request → Process configs
+  // Client request on /sub/<token> → Process & merge configs
+  if (isConfigRequest(req)) {
     console.log(`[CLIENT] Processing mode`);
-    
+
     try {
       const { configs, headers } = await fetchSubscriptionData(req.url);
       console.log(`[CLIENT] Received ${configs.length} configs`);
-      
+
       const merged = processConfigs(configs);
       console.log(`[CLIENT] Generated ${merged.length} merged configs`);
 
@@ -558,7 +534,7 @@ const server = http.createServer(async (req, res) => {
         'Cache-Control': 'no-store',
         ...headers,
       };
-      
+
       res.writeHead(200, responseHeaders);
       res.end(JSON.stringify(merged, null, 2));
     } catch (error) {
@@ -568,10 +544,10 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
-  
-  // Default: Proxy to original server for all other paths
-  console.log(`[DEFAULT] Proxy mode for ${req.url}`);
-  proxyRequest(req, res);});
+
+  // Everything else (browser HTML + /info /links /apps /usage + any other path) → Reverse proxy
+  proxyRequest(req, res);
+});
 
 server.listen(PORT, () => {
   console.log(`\n🚀 Config Merger Server`);
@@ -581,7 +557,7 @@ server.listen(PORT, () => {
   console.log(`   Browser: http://localhost:${PORT}/sub/<path>`);
   console.log(`   Client:  curl -H "Accept: application/json" http://localhost:${PORT}/sub/<path>`);
   console.log(`\n✨ Features:`);
-  console.log(`   • Browser requests → Redirect to original server`);
+  console.log(`   • Browser requests + panel APIs → Reverse proxy to original server`);
   console.log(`   • Client requests → Process & merge configs`);
   console.log(`   • Country-based grouping with balancer`);
   console.log(`   • VIP configs preserved`);
