@@ -88,6 +88,8 @@ function proxyRequest(req, res) {
   delete headers['connection'];
   delete headers['keep-alive'];
   delete headers['transfer-encoding'];
+  // Remove Accept-Encoding to get uncompressed response
+  delete headers['accept-encoding'];
   
   console.log('[PROXY] Forwarding headers:', JSON.stringify(headers, null, 2));
   
