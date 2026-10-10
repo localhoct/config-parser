@@ -378,7 +378,7 @@ function parseSSLink(link) {
 
 // ========== Config Builders ==========
 function buildMergedConfig(country, tag, configs) {
-  const flag = getFlag(country, configs[0]?.remarks);
+  const flag = getFlag(country, configs[0] ? configs[0].remarks : '');
   const outbounds = [];
   const proxyTags = [];
 
@@ -428,7 +428,7 @@ function buildMergedConfig(country, tag, configs) {
 }
 
 function buildSingleConfig(config) {
-  const outbound = config.outbounds?.find(o => o.tag === 'proxy' || o.protocol === 'vless' || o.protocol === 'trojan' || o.protocol === 'shadowsocks');
+  const outbound = config.outbounds ? config.outbounds.find(o => o.tag === 'proxy' || o.protocol === 'vless' || o.protocol === 'trojan' || o.protocol === 'shadowsocks') : null;
   if (!outbound) return config;
 
   const newOutbound = JSON.parse(JSON.stringify(outbound));
