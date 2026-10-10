@@ -309,6 +309,32 @@ function processConfigs(configs) {
   return result;
 }
 
+// Check if request is from browser (Accept: text/html)
+function isBrowserRequest(req) {
+  const acceptHeader = req.headers['accept'] || '';
+  return acceptHeader.includes('text/html');
+}
+
+// Fetch HTML page from original server (for browser requests)
+function fetchHtmlPage(path) {
+  return new Promise((resolve, reject) => {
+    const url = `https://www.software4you.ir${path}`;
+    
+    https.get(url, { 
+      headers: { 
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+      } 
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        resolve({ html: data, headers: res.headers });
+      });
+    }).on('error', reject);
+  });
+}
+
 // HTTP Server
 const server = http.createServer(async (req, res) => {
   // CORS headers
@@ -333,6 +359,57 @@ const server = http.createServer(async (req, res) => {
   if (req.url.startsWith('/sub/')) {
     try {
       const path = req.url;
+      const isBrowser = isBrowserRequest(req);
+      
+      console.log(`Request from: ${isBrowser ? 'Browser' : 'Client'} - ${path}`);
+      
+      // If browser request, fetch and return HTML page from original server
+      if (isBrowser) {
+        console.log(`Fetching HTML page from: https://www.software4you.ir${path}`);
+        try {
+          const { html, headers } = await fetchHtmlPage(path);
+          
+          res.writeHead(200, {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'no-store',
+          });
+          res.end(html);
+        } catch (err) {
+          // Fallback: show simple info page if original server is unavailable
+          console.error('Failed to fetch HTML page:', err.message);
+          const fallbackHtml = `<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Subscription Info</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; padding: 2rem; text-align: center; }
+    .card { max-width: 500px; margin: 2rem auto; padding: 2rem; background: #1e293b; border-radius: 1rem; border: 1px solid #334155; }
+    h1 { color: #60a5fa; }
+    p { color: #94a3b8; line-height: 1.6; }
+    code { background: #0f172a; padding: 0.5rem; border-radius: 0.5rem; display: block; margin: 1rem 0; direction: ltr; text-align: left; font-size: 0.8rem; overflow-x: auto; }
+    .status { color: #fbbf24; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>🔗 Subscription</h1>
+    <p class="status">⚠️ سرور اصلی در حال حاضر در دسترس نیست</p>
+    <p>لطفاً بعداً دوباره تلاش کنید یا از کلاینت مستقیماً استفاده کنید.</p>
+    <code>${req.url}</code>
+  </div>
+</body>
+</html>`;
+          res.writeHead(503, {
+            'Content-Type': 'text/html; charset=utf-8',
+          });
+          res.end(fallbackHtml);
+        }
+        return;
+      }
+      
+      // If client request, fetch and process configs
       console.log(`Fetching subscription from: https://www.software4you.ir${path}`);
       
       const configs = await fetchSubscription(path);
