@@ -8,6 +8,19 @@ const { URL } = require('url');
 const PORT = process.env.PORT || 3000;
 const TARGET_HOST = 'www.software4you.ir';
 
+// ========== Performance settings ==========
+// اتصال keep-alive به سرور اصلی: بدون handshake جدید TCP/TLS برای هر درخواست
+const upstreamAgent = new https.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 30000,
+  maxSockets: 100,
+  maxFreeSockets: 20,
+});
+const UPSTREAM_TIMEOUT_MS = Number(process.env.UPSTREAM_TIMEOUT_SECONDS || 15) * 1000;
+// کش کوتاه‌مدت نتیجه‌ی ترکیب‌شده (0 = غیرفعال)
+const CACHE_TTL_MS = Number(process.env.CACHE_TTL_SECONDS || 30) * 1000;
+const CACHE_MAX_ENTRIES = 500;
+
 // ========== Country Flags ==========
 const FLAGS = {
   'DE': '🇩🇪', 'NL': '🇳🇱', 'FI': '🇫🇮', 'US': '🇺🇸',
@@ -96,6 +109,8 @@ function proxyRequest(req, res) {
     path: targetUrl.pathname + targetUrl.search,
     method: req.method,
     headers: headers,
+    agent: upstreamAgent,
+    timeout: UPSTREAM_TIMEOUT_MS,
   };
 
   const proxyReq = https.request(options, (proxyRes) => {
@@ -109,6 +124,8 @@ function proxyRequest(req, res) {
       res.destroy();
     });
   });
+
+  proxyReq.on('timeout', () => proxyReq.destroy(new Error('Upstream timeout')));
 
   proxyReq.on('error', (err) => {
     console.error('[PROXY] Request error:', err.message);
@@ -133,11 +150,14 @@ function fetchSubscriptionData(path) {
       headers: {
         'User-Agent': 'Mozilla/5.0',
       },
+      agent: upstreamAgent,
+      timeout: UPSTREAM_TIMEOUT_MS,
     };
     
     const req = https.request(options, (res) => {
       // Handle redirects
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume(); // بدنه‌ی پاسخ redirect را مصرف کن تا سوکت آزاد شود
         const redirectUrl = new URL(res.headers.location, `https://${TARGET_HOST}`);
         console.log(`[FETCH] Redirect to: ${redirectUrl.pathname}`);
         
@@ -149,11 +169,16 @@ function fetchSubscriptionData(path) {
           headers: {
             'User-Agent': 'Mozilla/5.0',
           },
+          agent: upstreamAgent,
+          timeout: UPSTREAM_TIMEOUT_MS,
         };
         
-        https.request(redirectOptions, (redirectRes) => {
+        const redirectReq = https.request(redirectOptions, (redirectRes) => {
           processSubscriptionResponse(redirectRes, resolve, reject);
-        }).on('error', reject).end();
+        });
+        redirectReq.on('timeout', () => redirectReq.destroy(new Error('Upstream timeout')));
+        redirectReq.on('error', reject);
+        redirectReq.end();
         
         return;
       }
@@ -161,6 +186,7 @@ function fetchSubscriptionData(path) {
       processSubscriptionResponse(res, resolve, reject);
     });
     
+    req.on('timeout', () => req.destroy(new Error('Upstream timeout')));
     req.on('error', reject);
     req.end();
   });
@@ -450,10 +476,45 @@ function isProxyConfig(config) {
   return !!config.outbounds.find(o => o.protocol === 'vless' || o.protocol === 'trojan' || o.protocol === 'shadowsocks' || o.protocol === 'vmess');
 }
 
+// کانفیگ‌های وضعیت/اطلاعات کاربر (نه سرور واقعی):
+// حجم، تاریخ، نام کاربر، و پیام‌هایی مثل «حجم/زمان سرویس شما به پایان رسیده است».
+// این‌ها هرگز نباید گروه‌بندی یا ترکیب شوند و باید دقیقاً بدون تغییر عبور کنند.
+//
+// ملاک اصلی «آدرس ساختگی» (۰.۰.۰.۰) است، چون ایموجی‌ها در remark قابل تنظیم‌اند
+// و ممکن است روی سرورهای واقعی هم باشند (مثلاً «vless-ws Server {STATUS_EMOJI}»).
+const DATA_DATE_EMOJIS = ['⏳', '📅'];                       // قالب‌های {DATA_USAGE} و {TIME_LEFT}
+const STATUS_EMOJIS = ['✅', '⌛', '🪫', '❌', '🔌'];          // مقادیر {STATUS_EMOJI}
+
+function findAddress(node, depth = 0) {
+  if (!node || typeof node !== 'object' || depth > 6) return '';
+  if (typeof node.address === 'string' && node.address) return node.address;
+  for (const v of (Array.isArray(node) ? node : Object.values(node))) {
+    const found = findAddress(v, depth + 1);
+    if (found) return found;
+  }
+  return '';
+}
+
+function getOutboundAddress(config) {
+  const outbound = (config.outbounds || []).find(o =>
+    ['vless', 'vmess', 'trojan', 'shadowsocks'].includes(o.protocol));
+  return outbound ? findAddress(outbound.settings) : '';
+}
+
+function isPlaceholderAddress(addr) {
+  return /^(0\.0\.0\.\d+|127\.\d+\.\d+\.\d+|localhost)$/i.test(addr);
+}
+
 function isUserInfoConfig(config) {
   if (!isProxyConfig(config)) return true;
+
   const remarks = config.remarks || '';
-  return remarks.includes('⏳') || remarks.includes('📅') || remarks.includes('✅');
+  const addr = getOutboundAddress(config);
+
+  if (addr && isPlaceholderAddress(addr)) return true;               // آدرس ساختگی → کانفیگ نمایشی
+  if (DATA_DATE_EMOJIS.some(e => remarks.includes(e))) return true;  // حجم / تاریخ
+  if (!addr && STATUS_EMOJIS.some(e => remarks.includes(e))) return true; // آدرس قابل خواندن نیست → ایموجی وضعیت
+  return false;
 }
 
 function processConfigs(configs) {
@@ -486,6 +547,50 @@ function processConfigs(configs) {
 }
 
 // ========== HTTP Server ==========
+// ========== Cache + In-flight dedupe ==========
+// - اگر چند درخواست همزمان برای یک توکن بیاید، فقط یک درخواست به سرور اصلی زده می‌شود
+// - نتیجه‌ی ترکیب‌شده CACHE_TTL_MS ثانیه کش می‌شود (پردازش و fetch تکراری حذف می‌شود)
+const subCache = new Map();   // key -> { body, headers, expires }
+const inflight = new Map();   // key -> Promise<entry>
+
+function getMergedResponse(key) {
+  const hit = subCache.get(key);
+  if (hit && hit.expires > Date.now()) return Promise.resolve(hit);
+
+  const pending = inflight.get(key);
+  if (pending) return pending;
+
+  const p = (async () => {
+    const { configs, headers } = await fetchSubscriptionData(key);
+    console.log(`[CLIENT] Received ${configs.length} configs`);
+    const merged = processConfigs(configs);
+    console.log(`[CLIENT] Generated ${merged.length} merged configs`);
+
+    const entry = {
+      body: Buffer.from(JSON.stringify(merged)), // بدون indent: کوچک‌تر و سریع‌تر
+      headers,
+      expires: Date.now() + CACHE_TTL_MS,
+    };
+
+    if (CACHE_TTL_MS > 0) {
+      subCache.set(key, entry);
+      while (subCache.size > CACHE_MAX_ENTRIES) {
+        subCache.delete(subCache.keys().next().value);
+      }
+    }
+    return entry;
+  })().finally(() => inflight.delete(key));
+
+  inflight.set(key, p);
+  return p;
+}
+
+// پاک‌سازی دوره‌ای ورودی‌های منقضی
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of subCache) if (v.expires <= now) subCache.delete(k);
+}, 60000).unref();
+
 function isBrowserRequest(req) {
   return (req.headers['accept'] || '').includes('text/html');
 }
@@ -519,24 +624,19 @@ const server = http.createServer(async (req, res) => {
 
   // Client request on /sub/<token> → Process & merge configs
   if (isConfigRequest(req)) {
-    console.log(`[CLIENT] Processing mode`);
+    console.log(`[CLIENT] ${req.url.slice(0, 40)}...`);
 
     try {
-      const { configs, headers } = await fetchSubscriptionData(req.url);
-      console.log(`[CLIENT] Received ${configs.length} configs`);
+      const { body, headers } = await getMergedResponse(req.url);
 
-      const merged = processConfigs(configs);
-      console.log(`[CLIENT] Generated ${merged.length} merged configs`);
-
-      const responseHeaders = {
+      res.writeHead(200, {
         'Content-Type': 'application/json; charset=utf-8',
         'Content-Disposition': 'attachment; filename="merged-configs.json"',
         'Cache-Control': 'no-store',
+        'Content-Length': body.length,
         ...headers,
-      };
-
-      res.writeHead(200, responseHeaders);
-      res.end(JSON.stringify(merged, null, 2));
+      });
+      res.end(body);
     } catch (error) {
       console.error('[CLIENT] Error:', error.message);
       res.writeHead(500, { 'Content-Type': 'application/json' });
